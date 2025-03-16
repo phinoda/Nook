@@ -137,22 +137,11 @@ class _MyHomePageState extends State<MyHomePage> {
     return Container(
       width: 350, // Fixed width of 350
       height: screenHeight, // Full screen height
-      child: Scaffold(
-        body: Container(
-          width: double.infinity,
-          height: double.infinity,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.indigo.shade900,
-                Colors.purple.shade800,
-                Colors.deepPurple.shade600,
-              ],
-            ),
-          ),
-          child: SafeArea(
+      child: Material(
+        type: MaterialType.transparency, // Use transparent material
+        child: Scaffold(
+          backgroundColor: Colors.transparent, // Transparent background
+          body: SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(20.0),
               child: Column(
@@ -163,7 +152,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(15),
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                       child: Container(
                         padding: EdgeInsets.symmetric(vertical: 20, horizontal: 25),
                         decoration: BoxDecoration(
@@ -202,7 +191,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(15),
                       child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                         child: Container(
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.2),
@@ -277,7 +266,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                       child: Dismissible(
                                         key: Key(_tasks[index].title),
                                         background: Container(
-                                          color: Colors.red.withOpacity(0.7),
+                                          color: Colors.red.withOpacity(0.5),
                                           alignment: Alignment.centerRight,
                                           padding: EdgeInsets.only(right: 20),
                                           child: Icon(Icons.delete, color: Colors.white),
@@ -299,7 +288,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                               },
                                               checkColor: Colors.white,
                                               fillColor: MaterialStateProperty.resolveWith(
-                                                (states) => Colors.deepPurple.shade300,
+                                                (states) => Colors.deepPurple.shade300.withOpacity(0.7),
                                               ),
                                             ),
                                             title: Text(
