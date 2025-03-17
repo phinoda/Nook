@@ -295,88 +295,107 @@ class _MyHomePageState extends State<MyHomePage> {
                                             ),
                                           ),
                                         )
-                                      : ListView.builder(
+                                      : ReorderableListView.builder(
                                           padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                           itemCount: _tasks.length,
+                                          buildDefaultDragHandles: false,
+                                          proxyDecorator: (child, index, animation) {
+                                            // Return the child directly without decoration
+                                            return child;
+                                          },
+                                          onReorder: (oldIndex, newIndex) {
+                                            setState(() {
+                                              if (oldIndex < newIndex) {
+                                                newIndex -= 1;
+                                              }
+                                              final Task item = _tasks.removeAt(oldIndex);
+                                              _tasks.insert(newIndex, item);
+                                            });
+                                          },
                                           itemBuilder: (context, index) {
                                             return Padding(
+                                              key: Key(_tasks[index].title + index.toString()),
                                               padding: const EdgeInsets.only(bottom: 4.0),
                                               child: MouseRegion(
                                                 onEnter: (_) => setState(() => _hoveredIndex = index),
                                                 onExit: (_) => setState(() => _hoveredIndex = null),
-                                                child: Dismissible(
-                                                  key: Key(_tasks[index].title),
-                                                  background: Container(
-                                                    color: Colors.red.shade100,
-                                                    alignment: Alignment.centerRight,
-                                                    padding: EdgeInsets.only(right: 10),
-                                                    child: Icon(Icons.delete, color: Colors.red),
-                                                  ),
-                                                  direction: DismissDirection.endToStart,
-                                                  onDismissed: (direction) {
-                                                    _deleteTask(index);
-                                                  },
-                                                  child: Container(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Padding(
-                                                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                          child: Row(
-                                                            children: [
-                                                              Checkbox(
-                                                                value: _tasks[index].isCompleted,
-                                                                onChanged: (value) {
-                                                                  _toggleTask(index);
-                                                                },
-                                                                activeColor: Colors.black,
-                                                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                                visualDensity: VisualDensity.compact,
-                                                              ),
-                                                              SizedBox(width: 4),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  _tasks[index].title,
-                                                                  style: TextStyle(
-                                                                    color: Colors.black87,
-                                                                    decoration: _tasks[index].isCompleted
-                                                                        ? TextDecoration.lineThrough
-                                                                        : null,
-                                                                    decorationColor: Colors.black54,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                        if (_hoveredIndex == index)
+                                                child: ReorderableDragStartListener(
+                                                  index: index,
+                                                  child: Material(
+                                                    color: Colors.white, // Ensure white background
+                                                    elevation: 0, // No shadow
+                                                    child: Container(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
                                                           Padding(
-                                                            padding: EdgeInsets.only(left: 40, bottom: 4),
+                                                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                                             child: Row(
                                                               children: [
-                                                                TextButton.icon(
-                                                                  icon: Icon(Icons.edit, size: 16, color: Colors.grey.shade600),
-                                                                  label: Text('Edit', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                  onPressed: () => _editTask(index),
-                                                                  style: TextButton.styleFrom(
-                                                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                    minimumSize: Size(0, 24),
+                                                                MouseRegion(
+                                                                  cursor: SystemMouseCursors.grab,
+                                                                  child: Icon(
+                                                                    Icons.drag_indicator,
+                                                                    size: 16,
+                                                                    color: Colors.grey.shade400,
                                                                   ),
                                                                 ),
-                                                                SizedBox(width: 8),
-                                                                TextButton.icon(
-                                                                  icon: Icon(Icons.delete, size: 16, color: Colors.grey.shade600),
-                                                                  label: Text('Delete', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                  onPressed: () => _deleteTask(index),
-                                                                  style: TextButton.styleFrom(
-                                                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                    minimumSize: Size(0, 24),
+                                                                SizedBox(width: 4),
+                                                                Checkbox(
+                                                                  value: _tasks[index].isCompleted,
+                                                                  onChanged: (value) {
+                                                                    _toggleTask(index);
+                                                                  },
+                                                                  activeColor: Colors.black,
+                                                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                                  visualDensity: VisualDensity.compact,
+                                                                ),
+                                                                SizedBox(width: 4),
+                                                                Expanded(
+                                                                  child: Text(
+                                                                    _tasks[index].title,
+                                                                    style: TextStyle(
+                                                                      color: Colors.black87,
+                                                                      decoration: _tasks[index].isCompleted
+                                                                          ? TextDecoration.lineThrough
+                                                                          : null,
+                                                                      decorationColor: Colors.black54,
+                                                                    ),
                                                                   ),
                                                                 ),
                                                               ],
                                                             ),
                                                           ),
-                                                      ],
+                                                          if (_hoveredIndex == index)
+                                                            Padding(
+                                                              padding: EdgeInsets.only(right: 10, bottom: 4),
+                                                              child: Row(
+                                                                mainAxisAlignment: MainAxisAlignment.end,
+                                                                children: [
+                                                                  TextButton.icon(
+                                                                    icon: Icon(Icons.edit, size: 16, color: Colors.grey.shade600),
+                                                                    label: Text('Edit', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                                                    onPressed: () => _editTask(index),
+                                                                    style: TextButton.styleFrom(
+                                                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                                                      minimumSize: Size(0, 24),
+                                                                    ),
+                                                                  ),
+                                                                  SizedBox(width: 8),
+                                                                  TextButton.icon(
+                                                                    icon: Icon(Icons.delete, size: 16, color: Colors.grey.shade600),
+                                                                    label: Text('Delete', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                                                    onPressed: () => _deleteTask(index),
+                                                                    style: TextButton.styleFrom(
+                                                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                                                      minimumSize: Size(0, 24),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
