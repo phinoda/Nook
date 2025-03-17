@@ -48,12 +48,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _taskController = TextEditingController();
   
   // Sample tasks
-  final List<Task> _tasks = [
-    Task(title: 'Complete project proposal'),
-    Task(title: 'Buy groceries', isCompleted: true),
-    Task(title: 'Schedule dentist appointment'),
-    Task(title: 'Call mom'),
-  ];
+  final List<Task> _tasks = [];
 
   @override
   void initState() {
@@ -79,17 +74,61 @@ class _MyHomePageState extends State<MyHomePage> {
     final timeFormat = DateFormat('h:mm a'); // Hour and minute (3:07 a.m.)
     
     setState(() {
-      _dateTime = '${dayFormat.format(now)}\n${dateFormat.format(now)}  ${timeFormat.format(now)}';
+      _dateTime = '${dayFormat.format(now)} ${dateFormat.format(now)}  ${timeFormat.format(now)}';
     });
   }
   
-  void _addTask() {
-    if (_taskController.text.isNotEmpty) {
-      setState(() {
-        _tasks.add(Task(title: _taskController.text));
-        _taskController.clear();
-      });
-    }
+  void _showAddTaskDialog() {
+    _taskController.clear(); // Clear any previous text
+    
+    // Show a dialog with just a text field
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 0), // Reduce bottom padding
+          content: TextField(
+            controller: _taskController,
+            autofocus: true, // Automatically focus and show keyboard
+            decoration: InputDecoration(
+              border: InputBorder.none, // Remove border
+              hintText: 'Type your task...',
+              hintStyle: TextStyle(color: Colors.grey.shade600),
+            ),
+            style: TextStyle(color: Colors.black, fontSize: 16),
+            // Add task when user presses Enter/Return key
+            onSubmitted: (value) {
+              if (value.isNotEmpty) {
+                setState(() {
+                  _tasks.add(Task(title: value));
+                });
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('Add', style: TextStyle(color: Colors.deepPurple)),
+              onPressed: () {
+                if (_taskController.text.isNotEmpty) {
+                  setState(() {
+                    _tasks.add(Task(title: _taskController.text));
+                  });
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
   
   void _toggleTask(int index) {
@@ -140,66 +179,53 @@ class _MyHomePageState extends State<MyHomePage> {
       child: Material(
         type: MaterialType.transparency, // Use transparent material
         child: Scaffold(
-          backgroundColor: Colors.transparent, // Transparent background
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.start,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  // Time display with frosted glass effect
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(15),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                      child: Container(
+          backgroundColor: Colors.white,
+          body: Stack(
+            children: [
+              // Main content
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      // Time display - Left aligned with white background and black text
+                      Container(
+                        width: double.infinity,
                         padding: EdgeInsets.symmetric(vertical: 20, horizontal: 25),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(15),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 1.5,
-                          ),
-                        ),
                         child: Text(
                           _dateTime,
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 14,
                             fontWeight: FontWeight.w400,
                             height: 1.5,
-                            color: Colors.white,
-                            shadows: [
-                              Shadow(
-                                blurRadius: 20.0,
-                                color: Colors.black.withOpacity(0.3),
-                                offset: Offset(2, 2),
-                              ),
-                            ],
+                            color: Colors.black,
                           ),
-                          textAlign: TextAlign.center,
+                          textAlign: TextAlign.left, // Left aligned text
                         ),
                       ),
-                    ),
-                  ),
-                  
-                  SizedBox(height: 25),
-                  
-                  // Todo List Section
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(15),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                      
+                      SizedBox(height: 25),
+                      
+                      // Todo List Section - White background with black text
+                      Expanded(
                         child: Container(
+                          width: double.infinity,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withOpacity(0.7),
                             borderRadius: BorderRadius.circular(15),
                             border: Border.all(
-                              color: Colors.white.withOpacity(0.3),
+                              color: Colors.grey.shade300,
                               width: 1.5,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ],
                           ),
                           child: Column(
                             children: [
@@ -211,54 +237,15 @@ class _MyHomePageState extends State<MyHomePage> {
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                    color: Colors.black87,
                                   ),
                                 ),
                               ),
                               
-                              // Add Task Input
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 15.0),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: TextField(
-                                        controller: _taskController,
-                                        style: TextStyle(color: Colors.white),
-                                        decoration: InputDecoration(
-                                          hintText: 'Add a new task',
-                                          hintStyle: TextStyle(color: Colors.white70),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Colors.white30),
-                                          ),
-                                          enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Colors.white30),
-                                          ),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Colors.white),
-                                          ),
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: 10),
-                                    IconButton(
-                                      icon: Icon(Icons.add, color: Colors.white),
-                                      onPressed: _addTask,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              
-                              SizedBox(height: 10),
-                              
                               // Task List
                               Expanded(
                                 child: ListView.builder(
-                                  padding: EdgeInsets.symmetric(horizontal: 15),
+                                  padding: EdgeInsets.symmetric(horizontal: 15, vertical: 5),
                                   itemCount: _tasks.length,
                                   itemBuilder: (context, index) {
                                     return Padding(
@@ -266,10 +253,10 @@ class _MyHomePageState extends State<MyHomePage> {
                                       child: Dismissible(
                                         key: Key(_tasks[index].title),
                                         background: Container(
-                                          color: Colors.red.withOpacity(0.5),
+                                          color: Colors.red.shade100,
                                           alignment: Alignment.centerRight,
                                           padding: EdgeInsets.only(right: 20),
-                                          child: Icon(Icons.delete, color: Colors.white),
+                                          child: Icon(Icons.delete, color: Colors.red),
                                         ),
                                         direction: DismissDirection.endToStart,
                                         onDismissed: (direction) {
@@ -277,7 +264,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                         },
                                         child: Container(
                                           decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(0.1),
+                                            color: Colors.grey.shade100,
                                             borderRadius: BorderRadius.circular(10),
                                           ),
                                           child: ListTile(
@@ -286,23 +273,20 @@ class _MyHomePageState extends State<MyHomePage> {
                                               onChanged: (value) {
                                                 _toggleTask(index);
                                               },
-                                              checkColor: Colors.white,
-                                              fillColor: MaterialStateProperty.resolveWith(
-                                                (states) => Colors.deepPurple.shade300.withOpacity(0.7),
-                                              ),
+                                              activeColor: Colors.deepPurple.shade300,
                                             ),
                                             title: Text(
                                               _tasks[index].title,
                                               style: TextStyle(
-                                                color: Colors.white,
+                                                color: Colors.black87,
                                                 decoration: _tasks[index].isCompleted
                                                     ? TextDecoration.lineThrough
                                                     : null,
-                                                decorationColor: Colors.white,
+                                                decorationColor: Colors.black54,
                                               ),
                                             ),
                                             trailing: IconButton(
-                                              icon: Icon(Icons.delete, color: Colors.white70),
+                                              icon: Icon(Icons.delete, color: Colors.grey.shade600),
                                               onPressed: () => _deleteTask(index),
                                             ),
                                           ),
@@ -316,11 +300,50 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // Absolutely positioned "+" button at the bottom
+              Positioned(
+                bottom: 20, // 20 pixels from bottom
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        customBorder: CircleBorder(),
+                        onTap: _showAddTaskDialog,
+                        child: Center(
+                          child: Icon(
+                            Icons.add,
+                            size: 30,
+                            color: Colors.deepPurple,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),

@@ -32,9 +32,9 @@ class MainFlutterWindow: NSWindow {
       height: windowHeight
     )
     
-    // Create off-screen frame (hidden position, just off the right edge)
+    // Create off-screen frame (hidden position, completely off-screen)
     offScreenFrame = NSRect(
-      x: screenFrame.maxX + 5, // Just off-screen to the right
+      x: screenFrame.maxX + windowWidth + 500, // Move it way off-screen with extra margin
       y: screenFrame.minY,
       width: windowWidth,
       height: windowHeight
@@ -48,38 +48,25 @@ class MainFlutterWindow: NSWindow {
     self.level = NSWindow.Level.floating
     self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     
-    // Make the window transparent
-    self.isOpaque = false
-    self.backgroundColor = NSColor.clear
-    self.hasShadow = false
-    self.alphaValue = 0.75 // 25% transparent
+    // Make the window transparent with a white background
+    self.isOpaque = true
+    self.backgroundColor = NSColor.white
+    self.hasShadow = true
     
-    // Create a visual effect view for background blur
+    // Set the window appearance to light/vibrant light
+    self.appearance = NSAppearance(named: .vibrantLight) // Use light appearance instead of dark
+    
+    // Enable backdrop blur using the window's appearance
     if let contentView = self.contentView {
-      // Make sure the content view can have layers
-      contentView.wantsLayer = true
-      
-      // Create a visual effect view with the same size as the content view
+      // Create a visual effect view that covers the entire window
       let visualEffectView = NSVisualEffectView(frame: contentView.bounds)
-      
-      // Configure the visual effect for maximum blur
-      visualEffectView.material = .hudWindow // This gives a strong blur effect
+      visualEffectView.material = .sheet // This gives a light blur effect
       visualEffectView.blendingMode = .behindWindow // Blur what's behind the window
       visualEffectView.state = .active // Keep the blur active
-      
-      // Make sure the visual effect view resizes with the window
       visualEffectView.autoresizingMask = [.width, .height]
       
-      // Add the visual effect view behind all other content
+      // Add the visual effect view as the background
       contentView.addSubview(visualEffectView, positioned: .below, relativeTo: nil)
-      
-      // For even more blur, you can add a second visual effect view with different settings
-      let secondaryBlurView = NSVisualEffectView(frame: contentView.bounds)
-      secondaryBlurView.material = .sheet
-      secondaryBlurView.blendingMode = .withinWindow
-      secondaryBlurView.state = .active
-      secondaryBlurView.autoresizingMask = [.width, .height]
-      visualEffectView.addSubview(secondaryBlurView)
     }
     
     // Register for global mouse move events
@@ -94,6 +81,8 @@ class MainFlutterWindow: NSWindow {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.hideAppWindow()
     }
+    
+    print("Setting frames - onScreen: \(onScreenFrame), offScreen: \(offScreenFrame)")
   }
   
   private func handleMouseMoved(_ event: NSEvent) {
@@ -104,13 +93,18 @@ class MainFlutterWindow: NSWindow {
     let rightEdge = screenFrame.maxX
     let distanceFromEdge = rightEdge - mouseLocation.x
     
+    // Add debug print to see mouse position (uncomment for debugging)
+    // print("Mouse position: \(mouseLocation.x), \(mouseLocation.y), Distance: \(distanceFromEdge)")
+    
     // Check if mouse is within threshold from right edge
     if distanceFromEdge <= edgeThreshold {
       if !windowVisible {
+        print("Mouse near edge, showing window")
         showAppWindow()
       }
     } else {
       if windowVisible && !self.frame.contains(mouseLocation) {
+        print("Mouse away from window, hiding window")
         hideAppWindow()
       }
     }
@@ -118,13 +112,20 @@ class MainFlutterWindow: NSWindow {
   
   private func showAppWindow() {
     if !windowVisible {
+      // Make window visible but transparent initially
+      self.alphaValue = 0.0
+      self.makeKeyAndOrderFront(nil)
+      
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
+        // Move window on-screen
         self.animator().setFrame(onScreenFrame, display: true)
-        self.animator().alphaValue = 0.75 // 25% transparent when visible
+        // Make window fully opaque
+        self.animator().alphaValue = 1.0
       }
-      self.makeKeyAndOrderFront(nil)
+      
       windowVisible = true
+      print("Window should now be visible")
     }
   }
   
@@ -132,10 +133,14 @@ class MainFlutterWindow: NSWindow {
     if windowVisible {
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
+        // Move window off-screen
         self.animator().setFrame(offScreenFrame, display: true)
-        self.animator().alphaValue = 0.5
+        // Make window completely transparent
+        self.animator().alphaValue = 0.0
       }
+      
       windowVisible = false
+      print("Window should now be hidden")
     }
   }
 }
