@@ -99,12 +99,10 @@ class MainFlutterWindow: NSWindow {
     // Check if mouse is within threshold from right edge
     if distanceFromEdge <= edgeThreshold {
       if !windowVisible {
-        print("Mouse near edge, showing window")
         showAppWindow()
       }
     } else {
       if windowVisible && !self.frame.contains(mouseLocation) {
-        print("Mouse away from window, hiding window")
         hideAppWindow()
       }
     }
