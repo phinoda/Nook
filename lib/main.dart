@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'dart:ui';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() {
   runApp(const MyApp());
@@ -34,6 +36,22 @@ class Task {
   bool isCompleted;
   
   Task({required this.title, this.isCompleted = false});
+  
+  // Convert Task to JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'isCompleted': isCompleted,
+    };
+  }
+  
+  // Create Task from JSON
+  factory Task.fromJson(Map<String, dynamic> json) {
+    return Task(
+      title: json['title'],
+      isCompleted: json['isCompleted'],
+    );
+  }
 }
 
 class MyHomePage extends StatefulWidget {
@@ -52,17 +70,19 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _taskController = TextEditingController();
   
   // Sample tasks
-  final List<Task> _tasks = [];
+  List<Task> _tasks = [];
   int? _hoveredIndex;
 
   @override
   void initState() {
     super.initState();
     _updateDateTime();
-    // Update time every second
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
       _updateDateTime();
     });
+    
+    // Load saved tasks
+    _loadTasks();
   }
 
   @override
@@ -84,9 +104,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
   
   void _showAddTaskDialog() {
-    _taskController.clear(); // Clear any previous text
+    _taskController.clear();
     
-    // Show a dialog with just a text field
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -108,6 +127,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 setState(() {
                   _tasks.add(Task(title: value));
                 });
+                _saveTasks();
                 Navigator.of(context).pop();
               }
             },
@@ -126,6 +146,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   setState(() {
                     _tasks.add(Task(title: _taskController.text));
                   });
+                  _saveTasks();
                   Navigator.of(context).pop();
                 }
               },
@@ -139,13 +160,31 @@ class _MyHomePageState extends State<MyHomePage> {
   void _toggleTask(int index) {
     setState(() {
       _tasks[index].isCompleted = !_tasks[index].isCompleted;
+      
+      // If task is completed, move it to the end of the list
+      if (_tasks[index].isCompleted) {
+        final Task completedTask = _tasks.removeAt(index);
+        _tasks.add(completedTask);
+      } else {
+        // If a task is unchecked, move it to be with the active tasks
+        // Find the position of the first completed task
+        int firstCompletedIndex = _tasks.indexWhere((task) => task.isCompleted);
+        
+        // If there are completed tasks and this task is after the first completed task
+        if (firstCompletedIndex != -1 && firstCompletedIndex < index) {
+          final Task uncheckedTask = _tasks.removeAt(index);
+          _tasks.insert(firstCompletedIndex, uncheckedTask);
+        }
+      }
     });
+    _saveTasks();
   }
   
   void _deleteTask(int index) {
     setState(() {
       _tasks.removeAt(index);
     });
+    _saveTasks();
   }
   
   void _editTask(int index) {
@@ -171,6 +210,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 setState(() {
                   _tasks[index].title = value;
                 });
+                _saveTasks();
                 Navigator.of(context).pop();
               }
             },
@@ -189,6 +229,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   setState(() {
                     _tasks[index].title = _taskController.text;
                   });
+                  _saveTasks();
                   Navigator.of(context).pop();
                 }
               },
@@ -214,6 +255,60 @@ class _MyHomePageState extends State<MyHomePage> {
     } on PlatformException catch (e) {
       print("Failed to show window: ${e.message}");
     }
+  }
+
+  // Save tasks to SharedPreferences
+  Future<void> _saveTasks() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Convert tasks to JSON
+    final List<String> tasksJson = _tasks.map((task) => 
+      jsonEncode(task.toJson())
+    ).toList();
+    
+    // Save JSON string list to SharedPreferences
+    await prefs.setStringList('tasks', tasksJson);
+  }
+
+  // Load tasks from SharedPreferences
+  Future<void> _loadTasks() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get JSON string list from SharedPreferences
+    final List<String>? tasksJson = prefs.getStringList('tasks');
+    
+    if (tasksJson != null) {
+      // Convert JSON to tasks
+      setState(() {
+        _tasks = tasksJson.map((taskJson) => 
+          Task.fromJson(jsonDecode(taskJson))
+        ).toList();
+        
+        // Sort tasks to ensure completed tasks are at the end
+        _sortTasks();
+      });
+    }
+  }
+  
+  // Sort tasks with completed tasks at the end
+  void _sortTasks() {
+    _tasks.sort((a, b) {
+      if (a.isCompleted && !b.isCompleted) {
+        return 1; // a comes after b
+      } else if (!a.isCompleted && b.isCompleted) {
+        return -1; // a comes before b
+      } else {
+        return 0; // maintain relative order
+      }
+    });
+  }
+
+  // Calculate the percentage of completed tasks
+  double _calculateCompletionPercentage() {
+    if (_tasks.isEmpty) return 0.0;
+    
+    int completedTasks = _tasks.where((task) => task.isCompleted).length;
+    return completedTasks / _tasks.length;
   }
 
   @override
@@ -275,7 +370,58 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                         ),
                         
-                        SizedBox(height: 25),
+                        // Progress bar showing task completion percentage
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Percentage text
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    "Progress",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                  Text(
+                                    "${(_calculateCompletionPercentage() * 100).toInt()}%",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade700,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 5),
+                              // Progress bar
+                              Container(
+                                height: 4,
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: _calculateCompletionPercentage(),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        
+                        SizedBox(height: 15), // Reduced from 25 to 15
                         
                         // Todo List Section - White background with black text
                         Expanded(
@@ -311,6 +457,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                               final Task item = _tasks.removeAt(oldIndex);
                                               _tasks.insert(newIndex, item);
                                             });
+                                            _saveTasks();
                                           },
                                           itemBuilder: (context, index) {
                                             return Padding(
@@ -332,34 +479,47 @@ class _MyHomePageState extends State<MyHomePage> {
                                                             padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                                             child: Row(
                                                               children: [
-                                                                MouseRegion(
-                                                                  cursor: SystemMouseCursors.grab,
-                                                                  child: Icon(
-                                                                    Icons.drag_indicator,
-                                                                    size: 16,
-                                                                    color: Colors.grey.shade400,
+                                                                // Show drag indicator only when hovering
+                                                                if (_hoveredIndex == index)
+                                                                  MouseRegion(
+                                                                    cursor: SystemMouseCursors.grab,
+                                                                    child: Icon(
+                                                                      Icons.drag_indicator,
+                                                                      size: 16,
+                                                                      color: Colors.grey.shade400,
+                                                                    ),
+                                                                  ),
+                                                                // Add spacing only when drag indicator is shown
+                                                                if (_hoveredIndex == index)
+                                                                  SizedBox(width: 4),
+                                                                Material(
+                                                                  type: MaterialType.transparency,
+                                                                  child: Checkbox(
+                                                                    value: _tasks[index].isCompleted,
+                                                                    onChanged: (value) {
+                                                                      _toggleTask(index);
+                                                                    },
+                                                                    activeColor: Colors.black,
+                                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                                    visualDensity: VisualDensity.compact,
+                                                                    hoverColor: Colors.transparent,
+                                                                    focusColor: Colors.transparent,
+                                                                    splashRadius: 0,
                                                                   ),
                                                                 ),
                                                                 SizedBox(width: 4),
-                                                                Checkbox(
-                                                                  value: _tasks[index].isCompleted,
-                                                                  onChanged: (value) {
-                                                                    _toggleTask(index);
-                                                                  },
-                                                                  activeColor: Colors.black,
-                                                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                                  visualDensity: VisualDensity.compact,
-                                                                ),
-                                                                SizedBox(width: 4),
                                                                 Expanded(
-                                                                  child: Text(
-                                                                    _tasks[index].title,
-                                                                    style: TextStyle(
-                                                                      color: Colors.black87,
-                                                                      decoration: _tasks[index].isCompleted
-                                                                          ? TextDecoration.lineThrough
-                                                                          : null,
-                                                                      decorationColor: Colors.black54,
+                                                                  child: MouseRegion(
+                                                                    cursor: SystemMouseCursors.text,
+                                                                    child: Text(
+                                                                      _tasks[index].title,
+                                                                      style: TextStyle(
+                                                                        color: Colors.black87,
+                                                                        decoration: _tasks[index].isCompleted
+                                                                            ? TextDecoration.lineThrough
+                                                                            : null,
+                                                                        decorationColor: Colors.black54,
+                                                                      ),
                                                                     ),
                                                                   ),
                                                                 ),
@@ -372,23 +532,29 @@ class _MyHomePageState extends State<MyHomePage> {
                                                               child: Row(
                                                                 mainAxisAlignment: MainAxisAlignment.end,
                                                                 children: [
-                                                                  TextButton.icon(
-                                                                    icon: Icon(Icons.edit, size: 16, color: Colors.grey.shade600),
-                                                                    label: Text('Edit', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                    onPressed: () => _editTask(index),
-                                                                    style: TextButton.styleFrom(
-                                                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                      minimumSize: Size(0, 24),
+                                                                  MouseRegion(
+                                                                    cursor: SystemMouseCursors.click,
+                                                                    child: TextButton.icon(
+                                                                      icon: Icon(Icons.edit, size: 16, color: Colors.grey.shade600),
+                                                                      label: Text('Edit', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                                                      onPressed: () => _editTask(index),
+                                                                      style: TextButton.styleFrom(
+                                                                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                                                        minimumSize: Size(0, 24),
+                                                                      ),
                                                                     ),
                                                                   ),
                                                                   SizedBox(width: 8),
-                                                                  TextButton.icon(
-                                                                    icon: Icon(Icons.delete, size: 16, color: Colors.grey.shade600),
-                                                                    label: Text('Delete', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                    onPressed: () => _deleteTask(index),
-                                                                    style: TextButton.styleFrom(
-                                                                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                      minimumSize: Size(0, 24),
+                                                                  MouseRegion(
+                                                                    cursor: SystemMouseCursors.click,
+                                                                    child: TextButton.icon(
+                                                                      icon: Icon(Icons.delete, size: 16, color: Colors.grey.shade600),
+                                                                      label: Text('Delete', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                                                                      onPressed: () => _deleteTask(index),
+                                                                      style: TextButton.styleFrom(
+                                                                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                                                        minimumSize: Size(0, 24),
+                                                                      ),
                                                                     ),
                                                                   ),
                                                                 ],
