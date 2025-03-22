@@ -6,8 +6,48 @@ import 'package:intl/intl.dart';
 import 'dart:ui';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
+
+// Custom text selection controls with minimal visual feedback
+class MinimalTextSelectionControls extends TextSelectionControls {
+  @override
+  Widget buildHandle(BuildContext context, TextSelectionHandleType type, double textLineHeight, [VoidCallback? onTap]) {
+    return Container(width: 0, height: 0); // Invisible handle
+  }
+
+  @override
+  Widget buildToolbar(
+    BuildContext context,
+    Rect globalEditableRegion,
+    double textLineHeight,
+    Offset position,
+    List<TextSelectionPoint> endpoints,
+    TextSelectionDelegate delegate,
+    ValueListenable<ClipboardStatus>? clipboardStatus,
+    Offset? lastSecondaryTapDownPosition,
+  ) {
+    return Container(); // Empty toolbar
+  }
+
+  @override
+  Offset getHandleAnchor(TextSelectionHandleType type, double textLineHeight) {
+    return Offset.zero;
+  }
+
+  @override
+  Size getHandleSize(double textLineHeight) {
+    return Size(0, 0); // Zero size handle
+  }
+}
 
 void main() {
+  // Set system UI overlay style to remove highlight effects
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    systemNavigationBarColor: Colors.transparent,
+    statusBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+  ));
+  
   runApp(const MyApp());
 }
 
@@ -25,6 +65,37 @@ class MyApp extends StatelessWidget {
           primary: Colors.black,
           secondary: Colors.grey.shade700,
         ),
+        // Remove splash and highlight effects
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        // Set text selection theme
+        textSelectionTheme: TextSelectionThemeData(
+          cursorColor: Colors.black,
+          selectionHandleColor: Colors.transparent,
+        ),
+        // Override all button styles to remove highlight effects
+        buttonTheme: ButtonThemeData(
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+        ),
+        // Override checkbox theme
+        checkboxTheme: CheckboxThemeData(
+          splashRadius: 0,
+        ),
+        // Override input decoration theme
+        inputDecorationTheme: InputDecorationTheme(
+          border: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          errorBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          focusColor: Colors.transparent,
+          hoverColor: Colors.transparent,
+          fillColor: Colors.transparent,
+        ),
+        // Disable all material tap highlights
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       home: const MyHomePage(title: 'Nook'),
     );
@@ -68,10 +139,14 @@ class _MyHomePageState extends State<MyHomePage> {
   Timer? _timer;
   static const platform = MethodChannel('com.example.nook/window');
   final TextEditingController _taskController = TextEditingController();
+  final FocusNode _taskFocusNode = FocusNode();
+  final MinimalTextSelectionControls _textSelectionControls = MinimalTextSelectionControls();
   
   // Sample tasks
   List<Task> _tasks = [];
   int? _hoveredIndex;
+  int? _editingIndex;
+  bool _isAddingNewTask = false;
 
   @override
   void initState() {
@@ -79,6 +154,16 @@ class _MyHomePageState extends State<MyHomePage> {
     _updateDateTime();
     _timer = Timer.periodic(Duration(seconds: 1), (timer) {
       _updateDateTime();
+    });
+    
+    // Configure focus node to minimize highlight effect
+    _taskFocusNode.addListener(() {
+      if (_taskFocusNode.hasFocus) {
+        // When focused, ensure minimal visual feedback
+        SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+          systemNavigationBarColor: Colors.transparent,
+        ));
+      }
     });
     
     // Load saved tasks
@@ -89,6 +174,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void dispose() {
     _timer?.cancel();
     _taskController.dispose();
+    _taskFocusNode.dispose();
     super.dispose();
   }
 
@@ -101,143 +187,6 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _dateTime = '${dayFormat.format(now)} ${dateFormat.format(now)}  ${timeFormat.format(now)}';
     });
-  }
-  
-  void _showAddTaskDialog() {
-    _taskController.clear();
-    
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 0), // Reduce bottom padding
-          content: TextField(
-            controller: _taskController,
-            autofocus: true, // Automatically focus and show keyboard
-            decoration: InputDecoration(
-              border: InputBorder.none, // Remove border
-              hintText: 'Type your task...',
-              hintStyle: TextStyle(color: Colors.grey.shade600),
-            ),
-            style: TextStyle(color: Colors.black, fontSize: 16),
-            // Add task when user presses Enter/Return key
-            onSubmitted: (value) {
-              if (value.isNotEmpty) {
-                setState(() {
-                  _tasks.add(Task(title: value));
-                });
-                _saveTasks();
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-          actions: [
-            TextButton(
-              child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            TextButton(
-              child: Text('Add', style: TextStyle(color: Colors.black)),
-              onPressed: () {
-                if (_taskController.text.isNotEmpty) {
-                  setState(() {
-                    _tasks.add(Task(title: _taskController.text));
-                  });
-                  _saveTasks();
-                  Navigator.of(context).pop();
-                }
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-  
-  void _toggleTask(int index) {
-    setState(() {
-      _tasks[index].isCompleted = !_tasks[index].isCompleted;
-      
-      // If task is completed, move it to the end of the list
-      if (_tasks[index].isCompleted) {
-        final Task completedTask = _tasks.removeAt(index);
-        _tasks.add(completedTask);
-      } else {
-        // If a task is unchecked, move it to be with the active tasks
-        // Find the position of the first completed task
-        int firstCompletedIndex = _tasks.indexWhere((task) => task.isCompleted);
-        
-        // If there are completed tasks and this task is after the first completed task
-        if (firstCompletedIndex != -1 && firstCompletedIndex < index) {
-          final Task uncheckedTask = _tasks.removeAt(index);
-          _tasks.insert(firstCompletedIndex, uncheckedTask);
-        }
-      }
-    });
-    _saveTasks();
-  }
-  
-  void _deleteTask(int index) {
-    setState(() {
-      _tasks.removeAt(index);
-    });
-    _saveTasks();
-  }
-  
-  void _editTask(int index) {
-    _taskController.text = _tasks[index].title;
-    
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 0),
-          content: TextField(
-            controller: _taskController,
-            autofocus: true,
-            decoration: InputDecoration(
-              border: InputBorder.none,
-              hintText: 'Edit task...',
-              hintStyle: TextStyle(color: Colors.grey.shade600),
-            ),
-            style: TextStyle(color: Colors.black, fontSize: 16),
-            onSubmitted: (value) {
-              if (value.isNotEmpty) {
-                setState(() {
-                  _tasks[index].title = value;
-                });
-                _saveTasks();
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-          actions: [
-            TextButton(
-              child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            TextButton(
-              child: Text('Save', style: TextStyle(color: Colors.black)),
-              onPressed: () {
-                if (_taskController.text.isNotEmpty) {
-                  setState(() {
-                    _tasks[index].title = _taskController.text;
-                  });
-                  _saveTasks();
-                  Navigator.of(context).pop();
-                }
-              },
-            ),
-          ],
-        );
-      },
-    );
   }
   
   // Methods to control window visibility from Flutter if needed
@@ -311,6 +260,95 @@ class _MyHomePageState extends State<MyHomePage> {
     return completedTasks / _tasks.length;
   }
 
+  // Add a new task
+  void _addTask(String title) {
+    if (title.isNotEmpty) {
+      setState(() {
+        _tasks.add(Task(title: title));
+        _taskController.clear();
+        _isAddingNewTask = true; // Keep in adding mode for next task
+      });
+      _saveTasks();
+      // Focus remains on the text field for adding the next task
+      _taskFocusNode.requestFocus();
+    }
+  }
+
+  // Ensure text field gets focus with visible cursor
+  void _focusTextField() {
+    // First request focus
+    _taskFocusNode.requestFocus();
+    
+    // Then use a small delay to ensure the cursor is visible
+    Future.delayed(Duration(milliseconds: 50), () {
+      // Always ensure cursor is visible by setting selection
+      _taskController.selection = TextSelection.fromPosition(
+        TextPosition(offset: _taskController.text.length),
+      );
+    });
+  }
+
+  // Start editing a task
+  void _startEditingTask(int index) {
+    setState(() {
+      _editingIndex = index;
+      _taskController.text = _tasks[index].title;
+      _isAddingNewTask = false;
+    });
+    // Focus on the text field for editing with visible cursor
+    _focusTextField();
+  }
+
+  // Save edited task
+  void _saveEditedTask(int index, String newTitle) {
+    if (newTitle.isNotEmpty) {
+      setState(() {
+        _tasks[index].title = newTitle;
+        _editingIndex = null;
+        _taskController.clear();
+      });
+      _saveTasks();
+    }
+  }
+
+  // Toggle task completion
+  void _toggleTask(int index) {
+    setState(() {
+      _tasks[index].isCompleted = !_tasks[index].isCompleted;
+      
+      // If task is completed, move it to the end of the list
+      if (_tasks[index].isCompleted) {
+        final Task completedTask = _tasks.removeAt(index);
+        _tasks.add(completedTask);
+      } else {
+        // If a task is unchecked, move it to be with the active tasks
+        // Find the position of the first completed task
+        int firstCompletedIndex = _tasks.indexWhere((task) => task.isCompleted);
+        
+        // If there are completed tasks and this task is after the first completed task
+        if (firstCompletedIndex != -1 && firstCompletedIndex < index) {
+          final Task uncheckedTask = _tasks.removeAt(index);
+          _tasks.insert(firstCompletedIndex, uncheckedTask);
+        }
+      }
+    });
+    _saveTasks();
+  }
+
+  // Delete task with keyboard shortcut
+  void _deleteTask(int index) {
+    setState(() {
+      _tasks.removeAt(index);
+      if (_editingIndex == index) {
+        _editingIndex = null;
+        _taskController.clear();
+      } else if (_editingIndex != null && _editingIndex! > index) {
+        _editingIndex = _editingIndex! - 1;
+      }
+    });
+    _saveTasks();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Get the primary display size
@@ -333,10 +371,15 @@ class _MyHomePageState extends State<MyHomePage> {
           autofocus: true,
           onKeyEvent: (FocusNode node, KeyEvent event) {
             if (event is KeyDownEvent) {
-              // Check for Command+N shortcut
+              // Check for Command+N shortcut - now just focuses the new task field
               if (event.logicalKey == LogicalKeyboardKey.keyN && 
                   (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed)) {
-                _showAddTaskDialog();
+                setState(() {
+                  _editingIndex = null;
+                  _isAddingNewTask = true;
+                  _taskController.clear();
+                });
+                _taskFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
             }
@@ -427,29 +470,48 @@ class _MyHomePageState extends State<MyHomePage> {
                         Expanded(
                           child: Container(
                             width: double.infinity,
-        child: Column(
+                            child: Column(
                               children: [                              
                                 // Task List
                                 Expanded(
-                                  child: _tasks.isEmpty 
-                                      ? Center(
-                                          child: Text(
-                                            "No task yet",
-                                            style: TextStyle(
-                                              color: Colors.grey.shade600,
-                                              fontSize: 16,
+                                  child: _tasks.isEmpty && !_isAddingNewTask
+                                      ? GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _isAddingNewTask = true;
+                                              _taskController.clear();
+                                            });
+                                            // Ensure focus and cursor are visible
+                                            _focusTextField();
+                                          },
+                                          behavior: HitTestBehavior.opaque,
+                                          child: Center(
+                                            child: MouseRegion(
+                                              cursor: SystemMouseCursors.click,
+                                              child: Text(
+                                                "create your first task",
+                                                style: TextStyle(
+                                                  color: Colors.grey.shade600,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         )
                                       : ReorderableListView.builder(
-                                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                          itemCount: _tasks.length,
-                                          buildDefaultDragHandles: false,
+                                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+                                          itemCount: _tasks.length + (_isAddingNewTask ? 1 : 0) + (!_isAddingNewTask ? 1 : 0), // Add extra item for "Add new task" line
+                                          buildDefaultDragHandles: false, // We'll use custom drag handles
                                           proxyDecorator: (child, index, animation) {
-                                            // Return the child directly without decoration
+                                            // Return the child directly without decoration for clean dragging
                                             return child;
                                           },
                                           onReorder: (oldIndex, newIndex) {
+                                            // Don't allow reordering the "Add new task" item or the input field
+                                            if (oldIndex == _tasks.length || newIndex == _tasks.length) {
+                                              return;
+                                            }
+                                            
                                             setState(() {
                                               if (oldIndex < newIndex) {
                                                 newIndex -= 1;
@@ -460,109 +522,241 @@ class _MyHomePageState extends State<MyHomePage> {
                                             _saveTasks();
                                           },
                                           itemBuilder: (context, index) {
+                                            // New task input field at the end
+                                            if (_isAddingNewTask && index == _tasks.length) {
+                                              return Padding(
+                                                key: Key('new_task_input'),
+                                                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                                child: Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                                  children: [
+                                                    // Empty checkbox placeholder for alignment
+                                                    SizedBox(
+                                                      width: 24,
+                                                      height: 24,
+                                                    ),
+                                                    SizedBox(width: 4),
+                                                    // Text field for new task
+                                                    Expanded(
+                                                      child: TextField(
+                                                        controller: _taskController,
+                                                        focusNode: _taskFocusNode,
+                                                        selectionControls: _textSelectionControls,
+                                                        decoration: InputDecoration(
+                                                          border: InputBorder.none,
+                                                          hintText: 'Add a new task...',
+                                                          hintStyle: TextStyle(color: Colors.grey.shade400),
+                                                          isDense: true,
+                                                          contentPadding: EdgeInsets.zero,
+                                                          focusedBorder: InputBorder.none,
+                                                          enabledBorder: InputBorder.none,
+                                                        ),
+                                                        style: TextStyle(
+                                                          color: Colors.black87,
+                                                          fontSize: 14,
+                                                        ),
+                                                        cursorColor: Colors.black,
+                                                        cursorWidth: 1.5,
+                                                        showCursor: true,
+                                                        autofocus: true,
+                                                        enableInteractiveSelection: false,
+                                                        onSubmitted: (value) {
+                                                          _addTask(value);
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }
+                                            
+                                            // "Add new task" line at the bottom
+                                            if (!_isAddingNewTask && index == _tasks.length) {
+                                              return Padding(
+                                                key: Key('add_new_task'),
+                                                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                                child: MouseRegion(
+                                                  cursor: SystemMouseCursors.click,
+                                                  child: GestureDetector(
+                                                    behavior: HitTestBehavior.opaque,
+                                                    onTap: () {
+                                                      setState(() {
+                                                        _isAddingNewTask = true;
+                                                        _editingIndex = null;
+                                                        _taskController.clear();
+                                                      });
+                                                      // Ensure focus and cursor are visible
+                                                      _focusTextField();
+                                                    },
+                                                    child: Row(
+                                                      children: [
+                                                        SizedBox(width: 28), // Align with task text
+                                                        Text(
+                                                          "+ Add new task",
+                                                          style: TextStyle(
+                                                            color: Colors.grey.shade600,
+                                                            fontSize: 14,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                            
+                                            // Editing existing task
+                                            if (_editingIndex == index) {
+                                              return Padding(
+                                                key: Key('editing_task_${index}'),
+                                                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                                child: Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                                  children: [
+                                                    // Checkbox
+                                                    Material(
+                                                      type: MaterialType.transparency,
+                                                      child: Checkbox(
+                                                        value: _tasks[index].isCompleted,
+                                                        onChanged: (value) {
+                                                          _toggleTask(index);
+                                                        },
+                                                        activeColor: Colors.black,
+                                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                        visualDensity: VisualDensity.compact,
+                                                        hoverColor: Colors.transparent,
+                                                        focusColor: Colors.transparent,
+                                                        splashRadius: 0,
+                                                      ),
+                                                    ),
+                                                    SizedBox(width: 4),
+                                                    // Text field for editing
+                                                    Expanded(
+                                                      child: TextField(
+                                                        controller: _taskController,
+                                                        focusNode: _taskFocusNode,
+                                                        selectionControls: _textSelectionControls,
+                                                        decoration: InputDecoration(
+                                                          border: InputBorder.none,
+                                                          isDense: true,
+                                                          contentPadding: EdgeInsets.zero,
+                                                          focusedBorder: InputBorder.none,
+                                                          enabledBorder: InputBorder.none,
+                                                        ),
+                                                        style: TextStyle(
+                                                          color: Colors.black87,
+                                                          fontSize: 14,
+                                                          decoration: _tasks[index].isCompleted
+                                                              ? TextDecoration.lineThrough
+                                                              : null,
+                                                          decorationColor: Colors.black54,
+                                                        ),
+                                                        cursorColor: Colors.black,
+                                                        cursorWidth: 1.5,
+                                                        showCursor: true,
+                                                        autofocus: true,
+                                                        enableInteractiveSelection: false,
+                                                        onSubmitted: (value) {
+                                                          _saveEditedTask(index, value);
+                                                          // After editing, move to adding a new task
+                                                          setState(() {
+                                                            _isAddingNewTask = true;
+                                                            _taskController.clear();
+                                                          });
+                                                          _taskFocusNode.requestFocus();
+                                                        },
+                                                        onEditingComplete: () {
+                                                          // Handle Escape key to cancel editing
+                                                          if (_taskController.text.isEmpty) {
+                                                            setState(() {
+                                                              _editingIndex = null;
+                                                            });
+                                                          }
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }
+                                            
+                                            // Regular task display
                                             return Padding(
                                               key: Key(_tasks[index].title + index.toString()),
-                                              padding: const EdgeInsets.only(bottom: 4.0),
+                                              padding: const EdgeInsets.symmetric(vertical: 4.0),
                                               child: MouseRegion(
                                                 onEnter: (_) => setState(() => _hoveredIndex = index),
                                                 onExit: (_) => setState(() => _hoveredIndex = null),
-                                                child: ReorderableDragStartListener(
-                                                  index: index,
-                                                  child: Material(
-                                                    color: Colors.white, // Ensure white background
-                                                    elevation: 0, // No shadow
-                                                    child: Container(
-                                                      child: Column(
-                                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                                        children: [
-                                                          Padding(
-                                                            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                            child: Row(
-                                                              children: [
-                                                                // Show drag indicator only when hovering
-                                                                if (_hoveredIndex == index)
-                                                                  MouseRegion(
-                                                                    cursor: SystemMouseCursors.grab,
-                                                                    child: Icon(
-                                                                      Icons.drag_indicator,
-                                                                      size: 16,
-                                                                      color: Colors.grey.shade400,
-                                                                    ),
-                                                                  ),
-                                                                // Add spacing only when drag indicator is shown
-                                                                if (_hoveredIndex == index)
-                                                                  SizedBox(width: 4),
-                                                                Material(
-                                                                  type: MaterialType.transparency,
-                                                                  child: Checkbox(
-                                                                    value: _tasks[index].isCompleted,
-                                                                    onChanged: (value) {
-                                                                      _toggleTask(index);
-                                                                    },
-                                                                    activeColor: Colors.black,
-                                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                                    visualDensity: VisualDensity.compact,
-                                                                    hoverColor: Colors.transparent,
-                                                                    focusColor: Colors.transparent,
-                                                                    splashRadius: 0,
-                                                                  ),
-                                                                ),
-                                                                SizedBox(width: 4),
-                                                                Expanded(
-                                                                  child: MouseRegion(
-                                                                    cursor: SystemMouseCursors.text,
-                                                                    child: Text(
-                                                                      _tasks[index].title,
-                                                                      style: TextStyle(
-                                                                        color: Colors.black87,
-                                                                        decoration: _tasks[index].isCompleted
-                                                                            ? TextDecoration.lineThrough
-                                                                            : null,
-                                                                        decorationColor: Colors.black54,
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              ],
+                                                cursor: SystemMouseCursors.click,
+                                                child: GestureDetector(
+                                                  onTap: () => _startEditingTask(index),
+                                                  behavior: HitTestBehavior.opaque,
+                                                  child: Row(
+                                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                                    children: [
+                                                      // Show drag handle on hover
+                                                      if (_hoveredIndex == index)
+                                                        ReorderableDragStartListener(
+                                                          index: index,
+                                                          child: MouseRegion(
+                                                            cursor: SystemMouseCursors.grab,
+                                                            child: Icon(
+                                                              Icons.drag_indicator,
+                                                              size: 16,
+                                                              color: Colors.grey.shade400,
                                                             ),
                                                           ),
-                                                          if (_hoveredIndex == index)
-                                                            Padding(
-                                                              padding: EdgeInsets.only(right: 10, bottom: 4),
-                                                              child: Row(
-                                                                mainAxisAlignment: MainAxisAlignment.end,
-                                                                children: [
-                                                                  MouseRegion(
-                                                                    cursor: SystemMouseCursors.click,
-                                                                    child: TextButton.icon(
-                                                                      icon: Icon(Icons.edit, size: 16, color: Colors.grey.shade600),
-                                                                      label: Text('Edit', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                      onPressed: () => _editTask(index),
-                                                                      style: TextButton.styleFrom(
-                                                                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                        minimumSize: Size(0, 24),
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                  SizedBox(width: 8),
-                                                                  MouseRegion(
-                                                                    cursor: SystemMouseCursors.click,
-                                                                    child: TextButton.icon(
-                                                                      icon: Icon(Icons.delete, size: 16, color: Colors.grey.shade600),
-                                                                      label: Text('Delete', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                                                                      onPressed: () => _deleteTask(index),
-                                                                      style: TextButton.styleFrom(
-                                                                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                                                        minimumSize: Size(0, 24),
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                                ],
+                                                        )
+                                                      else
+                                                        SizedBox(width: 16),
+                                                      // Checkbox
+                                                      Material(
+                                                        type: MaterialType.transparency,
+                                                        child: Checkbox(
+                                                          value: _tasks[index].isCompleted,
+                                                          onChanged: (value) {
+                                                            _toggleTask(index);
+                                                          },
+                                                          activeColor: Colors.black,
+                                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                          visualDensity: VisualDensity.compact,
+                                                          hoverColor: Colors.transparent,
+                                                          focusColor: Colors.transparent,
+                                                          splashRadius: 0,
+                                                        ),
+                                                      ),
+                                                      SizedBox(width: 4),
+                                                      // Task text
+                                                      Expanded(
+                                                        child: Text(
+                                                          _tasks[index].title,
+                                                          style: TextStyle(
+                                                            color: Colors.black87,
+                                                            fontSize: 14,
+                                                            decoration: _tasks[index].isCompleted
+                                                                ? TextDecoration.lineThrough
+                                                                : null,
+                                                            decorationColor: Colors.black54,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      // Show delete icon on hover
+                                                      if (_hoveredIndex == index)
+                                                        MouseRegion(
+                                                          cursor: SystemMouseCursors.click,
+                                                          child: GestureDetector(
+                                                            onTap: () => _deleteTask(index),
+                                                            child: Padding(
+                                                              padding: const EdgeInsets.only(left: 8.0),
+                                                              child: Icon(
+                                                                Icons.close,
+                                                                size: 16,
+                                                                color: Colors.grey.shade400,
                                                               ),
                                                             ),
-                                                        ],
-                                                      ),
-                                                    ),
+                                                          ),
+                                                        ),
+                                                    ],
                                                   ),
                                                 ),
                                               ),
@@ -575,66 +769,6 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                ),
-                
-                // Absolutely positioned "+" button at the bottom
-                Positioned(
-                  bottom: 20, // 20 pixels from bottom
-                  left: 20, // Add left margin
-                  right: 20, // Add right margin
-                  child: Container(
-                    height: 40, // Smaller height
-                    padding: EdgeInsets.all(10), // 10 padding all around
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      // No shadow
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: _showAddTaskDialog,
-                        child: Center( // Center the content horizontally
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center, // Center the row content
-                            children: [
-                              Text(
-                                "+",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
-                              ),
-            Text(
-                                " add new task",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black,
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Container(
-                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  "⌘N",
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
                   ),
                 ),
