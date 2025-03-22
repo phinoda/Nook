@@ -3,9 +3,12 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var windowVisible = true
+  private var windowPeeking = false
   private let edgeThreshold: CGFloat = 20
   private var onScreenFrame: NSRect = .zero
   private var offScreenFrame: NSRect = .zero
+  private var peekScreenFrame: NSRect = .zero
+  private var peekWidth: CGFloat = 40 // Width of the window portion to show when peeking
   
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -27,6 +30,14 @@ class MainFlutterWindow: NSWindow {
     // Create on-screen frame (visible position) - RIGHT SIDE
     onScreenFrame = NSRect(
       x: screenFrame.maxX - windowWidth, // Position at right edge
+      y: screenFrame.minY,
+      width: windowWidth,
+      height: windowHeight
+    )
+    
+    // Create peek-screen frame (partially visible position)
+    peekScreenFrame = NSRect(
+      x: screenFrame.maxX - peekWidth, // Show only peekWidth pixels
       y: screenFrame.minY,
       width: windowWidth,
       height: windowHeight
@@ -74,6 +85,12 @@ class MainFlutterWindow: NSWindow {
       self?.handleMouseMoved(event)
     }
     
+    // Register for local mouse down events
+    NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+      self?.handleMouseDown(event)
+      return event
+    }
+    
     RegisterGeneratedPlugins(registry: flutterViewController)
     super.awakeFromNib()
     
@@ -82,7 +99,7 @@ class MainFlutterWindow: NSWindow {
       self?.hideAppWindow()
     }
     
-    print("Setting frames - onScreen: \(onScreenFrame), offScreen: \(offScreenFrame)")
+    print("Setting frames - onScreen: \(onScreenFrame), peekScreen: \(peekScreenFrame), offScreen: \(offScreenFrame)")
   }
   
   private func handleMouseMoved(_ event: NSEvent) {
@@ -98,20 +115,31 @@ class MainFlutterWindow: NSWindow {
     
     // Check if mouse is within threshold from right edge
     if distanceFromEdge <= edgeThreshold {
-      if !windowVisible {
-        showAppWindow()
+      if !windowVisible && !windowPeeking {
+        peekAppWindow()
       }
     } else {
       if windowVisible && !self.frame.contains(mouseLocation) {
+        hideAppWindow()
+      } else if windowPeeking && !self.frame.contains(mouseLocation) {
         hideAppWindow()
       }
     }
   }
   
+  private func handleMouseDown(_ event: NSEvent) {
+    if windowPeeking {
+      // If the window is in peek state and clicked, show it fully
+      showAppWindow()
+      return
+    }
+  }
+  
   private func showAppWindow() {
+    windowPeeking = false
+    
     if !windowVisible {
-      // Make window visible but transparent initially
-      self.alphaValue = 0.0
+      // Make window visible
       self.makeKeyAndOrderFront(nil)
       
       NSAnimationContext.runAnimationGroup { context in
@@ -123,12 +151,29 @@ class MainFlutterWindow: NSWindow {
       }
       
       windowVisible = true
-      print("Window should now be visible")
+      print("Window should now be fully visible")
     }
   }
   
+  private func peekAppWindow() {
+    // Show just a portion of the window
+    self.makeKeyAndOrderFront(nil)
+    
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.2
+      // Move window to peek position
+      self.animator().setFrame(peekScreenFrame, display: true)
+      // Make window fully opaque
+      self.animator().alphaValue = 1.0
+    }
+    
+    windowPeeking = true
+    windowVisible = false
+    print("Window should now be peeking")
+  }
+  
   private func hideAppWindow() {
-    if windowVisible {
+    if windowVisible || windowPeeking {
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
         // Move window off-screen
@@ -138,6 +183,7 @@ class MainFlutterWindow: NSWindow {
       }
       
       windowVisible = false
+      windowPeeking = false
       print("Window should now be hidden")
     }
   }
