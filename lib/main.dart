@@ -105,14 +105,17 @@ class MyApp extends StatelessWidget {
 class Task {
   String title;
   bool isCompleted;
+  String id; // Add an ID field for stable key generation
   
-  Task({required this.title, this.isCompleted = false});
+  Task({required this.title, this.isCompleted = false, String? id})
+      : this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString();
   
   // Convert Task to JSON
   Map<String, dynamic> toJson() {
     return {
       'title': title,
       'isCompleted': isCompleted,
+      'id': id, // Include ID in JSON serialization
     };
   }
   
@@ -121,6 +124,7 @@ class Task {
     return Task(
       title: json['title'],
       isCompleted: json['isCompleted'],
+      id: json['id'], // Read ID from JSON
     );
   }
 }
@@ -142,11 +146,10 @@ class _MyHomePageState extends State<MyHomePage> {
   final FocusNode _taskFocusNode = FocusNode();
   final MinimalTextSelectionControls _textSelectionControls = MinimalTextSelectionControls();
   
-  // Sample tasks
+  // Task management state
   List<Task> _tasks = [];
   int? _hoveredIndex;
   int? _editingIndex;
-  bool _isAddingNewTask = false;
 
   @override
   void initState() {
@@ -168,6 +171,22 @@ class _MyHomePageState extends State<MyHomePage> {
     
     // Load saved tasks
     _loadTasks();
+    
+    // Set up focus listener to handle task deletion when losing focus
+    _taskFocusNode.addListener(() {
+      if (!_taskFocusNode.hasFocus && _editingIndex != null) {
+        if (_taskController.text.isEmpty) {
+          // Delete task when focus is lost and the field is empty
+          setState(() {
+            if (_editingIndex! < _tasks.length) {
+              _tasks.removeAt(_editingIndex!);
+              _editingIndex = null;
+              _saveTasks();
+            }
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -260,23 +279,104 @@ class _MyHomePageState extends State<MyHomePage> {
     return completedTasks / _tasks.length;
   }
 
-  // Add a new task
-  void _addTask(String title) {
-    if (title.isNotEmpty) {
-      setState(() {
-        _tasks.insert(0, Task(title: title)); // Insert at the beginning instead of adding to the end
-        _taskController.clear();
-        _isAddingNewTask = true; // Keep in adding mode for next task
-      });
-      _saveTasks();
+  // Create a new empty task at the specified index and immediately edit it
+  void _createNewTaskAt(int index) {
+    // Save any current editing first
+    if (_editingIndex != null) {
+      _saveCurrentEditing();
+    }
+    
+    setState(() {
+      // Insert a new empty task at the specified index
+      _tasks.insert(index, Task(title: ''));
       
-      // Ensure focus and cursor are visible for the next task
-      // Use a short delay to allow the UI to update first
-      Future.delayed(Duration(milliseconds: 10), () {
-        _focusTextField();
-        // Force cursor to be visible
-        setState(() {});
+      // Start editing the new task
+      _editingIndex = index;
+      _taskController.clear();
+    });
+    
+    // Save tasks including the new empty one
+    _saveTasks();
+    
+    // Ensure the text field is focused with visible cursor
+    _focusTextField();
+  }
+  
+  // Create a new task after the current task being edited
+  void _createNewTaskAfter(int index) {
+    // Make sure we have a valid index
+    if (index < 0 || index >= _tasks.length) {
+      return;
+    }
+    
+    // First save any changes to the current task
+    if (_editingIndex != null && _editingIndex! < _tasks.length) {
+      final currentIndex = _editingIndex!;
+      
+      setState(() {
+        // Update the current task with whatever content it has
+        final Task updatedTask = Task(
+          title: _taskController.text,
+          isCompleted: _tasks[currentIndex].isCompleted,
+          id: _tasks[currentIndex].id
+        );
+        
+        // Replace the task at the index
+        _tasks[currentIndex] = updatedTask;
       });
+    }
+    
+    // Create a new task after the current one
+    setState(() {
+      // Insert a new empty task at the index after the current one
+      _tasks.insert(index + 1, Task(title: ''));
+      
+      // Start editing the new task
+      _editingIndex = index + 1;
+      _taskController.clear();
+    });
+    
+    // Save all tasks
+    _saveTasks();
+    
+    // Ensure the text field is focused with visible cursor
+    _focusTextField();
+  }
+  
+  // Create a new task at the beginning of the list
+  void _createFirstTask() {
+    _createNewTaskAt(0);
+  }
+
+  // Save the task currently being edited
+  void _saveCurrentEditing() {
+    if (_editingIndex != null && _editingIndex! < _tasks.length) {
+      final index = _editingIndex!;
+      
+      if (_taskController.text.isEmpty) {
+        // Only remove the task if we're actually losing focus (not creating a new task)
+        // We handle this by setting a flag or checking navigation direction
+        setState(() {
+          _tasks.removeAt(index);
+          // Note: we don't clear _editingIndex here, as that will happen in the code
+          // that called this method when moving to a different task
+        });
+      } else {
+        setState(() {
+          // Create a copy of the task with updated title but same ID and completion status
+          final Task updatedTask = Task(
+            title: _taskController.text,
+            isCompleted: _tasks[index].isCompleted,
+            id: _tasks[index].id
+          );
+          
+          // Replace the task at the index
+          _tasks[index] = updatedTask;
+        });
+      }
+      
+      // Save tasks
+      _saveTasks();
     }
   }
 
@@ -288,15 +388,13 @@ class _MyHomePageState extends State<MyHomePage> {
     // Make sure the widget updates with the cursor visible immediately
     setState(() {});
     
-    // Then use a small delay to ensure the cursor is visible
+    // Use a small delay to ensure the cursor is visible
     Future.delayed(Duration(milliseconds: 50), () {
-      // Always ensure cursor is visible by setting selection
       if (_taskFocusNode.hasFocus) {
+        // Force cursor position
         _taskController.selection = TextSelection.fromPosition(
           TextPosition(offset: _taskController.text.length),
         );
-        
-        // Make sure the widget updates with the cursor visible
         setState(() {});
       } else {
         // If focus was lost somehow, try again
@@ -308,52 +406,78 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Start editing a task
   void _startEditingTask(int index) {
+    // Check index bounds
+    if (index < 0 || index >= _tasks.length) {
+      return;
+    }
+    
+    // Save any current editing first
+    if (_editingIndex != null) {
+      _saveCurrentEditing();
+    }
+    
     setState(() {
       _editingIndex = index;
       _taskController.text = _tasks[index].title;
-      _isAddingNewTask = false;
     });
+    
     // Focus on the text field for editing with visible cursor
     _focusTextField();
   }
 
-  // Save edited task
-  void _saveEditedTask(int index, String newTitle) {
-    if (newTitle.isNotEmpty) {
-      setState(() {
-        _tasks[index].title = newTitle;
-        _editingIndex = null;
-        _taskController.clear();
-      });
-      _saveTasks();
-    }
-  }
-
   // Toggle task completion
   void _toggleTask(int index) {
+    // Check index bounds
+    if (index < 0 || index >= _tasks.length) {
+      return;
+    }
+    
+    // Save any current editing first
+    if (_editingIndex != null) {
+      _saveCurrentEditing();
+    }
+    
     setState(() {
-      _tasks[index].isCompleted = !_tasks[index].isCompleted;
+      // Update editing index if necessary
+      if (_editingIndex == index) {
+        _editingIndex = null;
+        _taskController.clear();
+      }
       
-      // If task is completed, move it to the end of the list
-      if (_tasks[index].isCompleted) {
-        final Task completedTask = _tasks.removeAt(index);
-        _tasks.add(completedTask);
+      // Create a copy of the task to prevent reference issues
+      final Task taskToToggle = _tasks[index];
+      final bool newCompletionState = !taskToToggle.isCompleted;
+      
+      // Create a new task with the same ID but toggled completion status
+      final Task toggledTask = Task(
+        title: taskToToggle.title,
+        isCompleted: newCompletionState,
+        id: taskToToggle.id // Keep the same ID
+      );
+      
+      // Remove the original task
+      _tasks.removeAt(index);
+      
+      // Insert the toggled task in the appropriate position
+      if (newCompletionState) {
+        // If now completed, add to the end
+        _tasks.add(toggledTask);
       } else {
-        // If a task is unchecked, move it to be with the active tasks
-        // Find the position of the first completed task
+        // If now unchecked, find where to insert it among active tasks
         int firstCompletedIndex = _tasks.indexWhere((task) => task.isCompleted);
-        
-        // If there are completed tasks and this task is after the first completed task
-        if (firstCompletedIndex != -1 && firstCompletedIndex < index) {
-          final Task uncheckedTask = _tasks.removeAt(index);
-          _tasks.insert(firstCompletedIndex, uncheckedTask);
+        if (firstCompletedIndex != -1) {
+          _tasks.insert(firstCompletedIndex, toggledTask);
+        } else {
+          // No completed tasks, add to the end
+          _tasks.add(toggledTask);
         }
       }
     });
+    
     _saveTasks();
   }
 
-  // Delete task with keyboard shortcut
+  // Delete task
   void _deleteTask(int index) {
     setState(() {
       _tasks.removeAt(index);
@@ -373,9 +497,6 @@ class _MyHomePageState extends State<MyHomePage> {
     final flutterView = ui.PlatformDispatcher.instance.views.first;
     final devicePixelRatio = flutterView.devicePixelRatio;
     
-    // This gets the window size, not the full screen
-    final windowSize = flutterView.physicalSize;
-    
     // For macOS, we can get the screen size this way
     final screenWidth = WidgetsBinding.instance.window.physicalSize.width / devicePixelRatio;
     final screenHeight = WidgetsBinding.instance.window.physicalSize.height / devicePixelRatio;
@@ -384,20 +505,15 @@ class _MyHomePageState extends State<MyHomePage> {
       width: 350, // Fixed width of 350
       height: screenHeight, // Full screen height
       child: Material(
-        type: MaterialType.transparency, // Use transparent material
+        type: MaterialType.transparency,
         child: Focus(
           autofocus: true,
           onKeyEvent: (FocusNode node, KeyEvent event) {
             if (event is KeyDownEvent) {
-              // Check for Command+N shortcut - now just focuses the new task field
+              // Check for Command+N shortcut to create a new task at the top
               if (event.logicalKey == LogicalKeyboardKey.keyN && 
                   (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed)) {
-                setState(() {
-                  _editingIndex = null;
-                  _isAddingNewTask = true;
-                  _taskController.clear();
-                });
-                _taskFocusNode.requestFocus();
+                _createNewTaskAt(0);
                 return KeyEventResult.handled;
               }
             }
@@ -405,421 +521,301 @@ class _MyHomePageState extends State<MyHomePage> {
           },
           child: Scaffold(
             backgroundColor: Colors.white,
-            body: Stack(
-              children: [
-                // Main content
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(10.0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        // Time display - Left aligned with white background and black text
-                        Container(
-                          width: double.infinity,
-                          padding: EdgeInsets.symmetric(vertical: 20, horizontal: 25),
-                          child: Text(
-                            _dateTime,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w400,
-                              height: 1.5,
-                              color: Colors.black,
-                            ),
-                            textAlign: TextAlign.left, // Left aligned text
-                          ),
+            body: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(10.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    // Time display - Left aligned with white background and black text
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 25),
+                      child: Text(
+                        _dateTime,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                          height: 1.5,
+                          color: Colors.black,
                         ),
-                        
-                        // Progress bar showing task completion percentage
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                    
+                    // Progress bar showing task completion percentage
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Percentage text
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              // Percentage text
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    "Progress",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade700,
-                                    ),
-                                  ),
-                                  Text(
-                                    "${(_calculateCompletionPercentage() * 100).toInt()}%",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade700,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              SizedBox(height: 5),
-                              // Progress bar
-                              Container(
-                                height: 4,
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(2),
+                              Text(
+                                "Progress",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade700,
                                 ),
-                                child: FractionallySizedBox(
-                                  alignment: Alignment.centerLeft,
-                                  widthFactor: _calculateCompletionPercentage(),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black,
-                                      borderRadius: BorderRadius.circular(2),
-                                    ),
-                                  ),
+                              ),
+                              Text(
+                                "${(_calculateCompletionPercentage() * 100).toInt()}%",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade700,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                        
-                        SizedBox(height: 15), // Reduced from 25 to 15
-                        
-                        // Todo List Section - White background with black text
-                        Expanded(
-                          child: Container(
+                          SizedBox(height: 5),
+                          // Progress bar
+                          Container(
+                            height: 4,
                             width: double.infinity,
-                            child: Column(
-                              children: [                              
-                                // Task List
-                                Expanded(
-                                  child: _tasks.isEmpty && !_isAddingNewTask
-                                      ? GestureDetector(
-                                          onTap: () {
-                                            setState(() {
-                                              _isAddingNewTask = true;
-                                              _taskController.clear();
-                                            });
-                                            // Ensure focus and cursor are visible
-                                            _focusTextField();
-                                          },
-                                          behavior: HitTestBehavior.opaque,
-                                          child: Center(
-                                            child: MouseRegion(
-                                              cursor: SystemMouseCursors.click,
-                                              child: Text(
-                                                "create your first task",
-                                                style: TextStyle(
-                                                  color: Colors.grey.shade600,
-                                                  fontSize: 16,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: _calculateCompletionPercentage(),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 15),
+                    
+                    // Todo List Section
+                    Expanded(
+                      child: _tasks.isEmpty
+                          ? GestureDetector(
+                              onTap: _createFirstTask,
+                              behavior: HitTestBehavior.opaque,
+                              child: Center(
+                                child: MouseRegion(
+                                  cursor: SystemMouseCursors.click,
+                                  child: Text(
+                                    "create your first task",
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ReorderableListView.builder(
+                              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+                              itemCount: _tasks.length,
+                              buildDefaultDragHandles: false,
+                              proxyDecorator: (child, index, animation) {
+                                return AnimatedBuilder(
+                                  animation: animation,
+                                  builder: (BuildContext context, Widget? child) {
+                                    final double animValue = Curves.easeInOut.transform(animation.value);
+                                    final double elevation = lerpDouble(0, 6, animValue)!;
+                                    return Material(
+                                      elevation: elevation,
+                                      color: Colors.white,
+                                      shadowColor: Colors.black26,
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: child,
+                                    );
+                                  },
+                                  child: child,
+                                );
+                              },
+                              onReorder: (int oldIndex, int newIndex) {
+                                // First check the bounds
+                                if (oldIndex < 0 || oldIndex >= _tasks.length || 
+                                    newIndex < 0 || newIndex > _tasks.length) {
+                                  return; // Prevent out-of-bounds operations
+                                }
+                                
+                                // Create a local reference to avoid potential null issues
+                                final Task? taskToMove = _tasks.length > oldIndex ? _tasks[oldIndex] : null;
+                                if (taskToMove == null) {
+                                  return; // Don't proceed if the task doesn't exist
+                                }
+                                
+                                setState(() {
+                                  // Save any current editing
+                                  if (_editingIndex != null) {
+                                    _saveCurrentEditing();
+                                  }
+                                
+                                  // Handle index adjustment when moving an item down
+                                  if (oldIndex < newIndex) {
+                                    newIndex -= 1;
+                                  }
+                                  
+                                  // Final bounds check after adjustment
+                                  if (newIndex >= _tasks.length) {
+                                    newIndex = _tasks.length - 1;
+                                  }
+                                  
+                                  // Move the task safely
+                                  _tasks.removeAt(oldIndex);
+                                  _tasks.insert(newIndex, taskToMove);
+                                  
+                                  // Update editing index if necessary
+                                  if (_editingIndex != null) {
+                                    if (_editingIndex == oldIndex) {
+                                      _editingIndex = newIndex;
+                                    } else if (oldIndex < _editingIndex! && newIndex >= _editingIndex!) {
+                                      _editingIndex = _editingIndex! - 1;
+                                    } else if (oldIndex > _editingIndex! && newIndex <= _editingIndex!) {
+                                      _editingIndex = _editingIndex! + 1;
+                                    }
+                                  }
+                                });
+                                
+                                _saveTasks();
+                              },
+                              itemBuilder: (context, index) {
+                                // Check if index is valid
+                                if (index < 0 || index >= _tasks.length) {
+                                  return SizedBox.shrink(key: Key('invalid_index_$index'));
+                                }
+
+                                // Check if task exists at this index
+                                final Task? task = _tasks[index];
+                                if (task == null) {
+                                  return SizedBox.shrink(key: Key('null_task_$index'));
+                                }
+                                
+                                // Editing existing task
+                                if (_editingIndex == index) {
+                                  return Padding(
+                                    key: Key('editing_task_${task.id}'),
+                                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        // Checkbox
+                                        Material(
+                                          type: MaterialType.transparency,
+                                          child: Checkbox(
+                                            value: task.isCompleted,
+                                            onChanged: (value) => _toggleTask(index),
+                                            activeColor: Colors.black,
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            visualDensity: VisualDensity.compact,
+                                            hoverColor: Colors.transparent,
+                                            focusColor: Colors.transparent,
+                                            splashRadius: 0,
+                                          ),
+                                        ),
+                                        SizedBox(width: 4),
+                                        // Text field for editing
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _taskController,
+                                            focusNode: _taskFocusNode,
+                                            selectionControls: _textSelectionControls,
+                                            decoration: InputDecoration(
+                                              border: InputBorder.none,
+                                              hintText: 'Task name...',
+                                              hintStyle: TextStyle(color: Colors.grey.shade400),
+                                              isDense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              focusedBorder: InputBorder.none,
+                                              enabledBorder: InputBorder.none,
+                                            ),
+                                            style: TextStyle(
+                                              color: Colors.black87,
+                                              fontSize: 14,
+                                            ),
+                                            cursorColor: Colors.black,
+                                            cursorWidth: 1.5,
+                                            showCursor: true,
+                                            autofocus: true,
+                                            enableInteractiveSelection: true,
+                                            keyboardType: TextInputType.text,
+                                            textInputAction: TextInputAction.next,
+                                            onSubmitted: (value) {
+                                              // Create a new task entry after the current one when Enter is pressed
+                                              _createNewTaskAfter(index);
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                
+                                // Regular task display
+                                return Padding(
+                                  key: Key('task_${task.id}'),
+                                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                  child: MouseRegion(
+                                    onEnter: (_) => setState(() => _hoveredIndex = index),
+                                    onExit: (_) => setState(() => _hoveredIndex = null),
+                                    cursor: SystemMouseCursors.click,
+                                    child: ReorderableDragStartListener(
+                                      index: index,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () => _startEditingTask(index),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            // Checkbox
+                                            GestureDetector(
+                                              onTap: () => _toggleTask(index),
+                                              child: Material(
+                                                type: MaterialType.transparency,
+                                                child: Checkbox(
+                                                  value: task.isCompleted,
+                                                  onChanged: null,
+                                                  activeColor: Colors.black,
+                                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                  visualDensity: VisualDensity.compact,
+                                                  hoverColor: Colors.transparent,
+                                                  focusColor: Colors.transparent,
+                                                  splashRadius: 0,
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        )
-                                      : ReorderableListView.builder(
-                                          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-                                          itemCount: _tasks.length + (_isAddingNewTask ? 1 : 0) + (!_isAddingNewTask ? 1 : 0), // Add extra item for "Add new task" line
-                                          buildDefaultDragHandles: false, // We'll use custom drag configuration
-                                          proxyDecorator: (child, index, animation) {
-                                            // Return the child with a subtle lift effect for dragging
-                                            return Material(
-                                              elevation: 2,
-                                              color: Colors.white,
-                                              shadowColor: Colors.black26,
-                                              borderRadius: BorderRadius.circular(4),
-                                              child: child,
-                                            );
-                                          },
-                                          onReorder: (oldIndex, newIndex) {
-                                            // Don't allow reordering the "Add new task" item or the input field
-                                            if (oldIndex == _tasks.length || newIndex == _tasks.length) {
-                                              return;
-                                            }
-                                            
-                                            setState(() {
-                                              if (oldIndex < newIndex) {
-                                                newIndex -= 1;
-                                              }
-                                              final Task item = _tasks.removeAt(oldIndex);
-                                              _tasks.insert(newIndex, item);
-                                            });
-                                            _saveTasks();
-                                          },
-                                          itemBuilder: (context, index) {
-                                            // New task input field at the end
-                                            if (_isAddingNewTask && index == _tasks.length) {
-                                              return Padding(
-                                                key: Key('new_task_input'),
-                                                padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                                child: Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                                  children: [
-                                                    // Checkbox
-                                                    Material(
-                                                      type: MaterialType.transparency,
-                                                      child: Checkbox(
-                                                        value: false,
-                                                        onChanged: null,
-                                                        activeColor: Colors.black,
-                                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                        visualDensity: VisualDensity.compact,
-                                                        hoverColor: Colors.transparent,
-                                                        focusColor: Colors.transparent,
-                                                        splashRadius: 0,
-                                                      ),
-                                                    ),
-                                                    SizedBox(width: 4),
-                                                    // Text field for new task
-                                                    Expanded(
-                                                      child: TextField(
-                                                        controller: _taskController,
-                                                        focusNode: _taskFocusNode,
-                                                        selectionControls: _textSelectionControls,
-                                                        decoration: InputDecoration(
-                                                          border: InputBorder.none,
-                                                          hintText: 'Add a new task...',
-                                                          hintStyle: TextStyle(color: Colors.grey.shade400),
-                                                          isDense: true,
-                                                          contentPadding: EdgeInsets.zero,
-                                                          focusedBorder: InputBorder.none,
-                                                          enabledBorder: InputBorder.none,
-                                                        ),
-                                                        style: TextStyle(
-                                                          color: Colors.black87,
-                                                          fontSize: 14,
-                                                        ),
-                                                        cursorColor: Colors.black,
-                                                        cursorWidth: 1.5,
-                                                        showCursor: true,
-                                                        autofocus: true,
-                                                        enableInteractiveSelection: true,
-                                                        keyboardType: TextInputType.text,
-                                                        textInputAction: TextInputAction.next,
-                                                        onSubmitted: (value) {
-                                                          if (value.isNotEmpty) {
-                                                            _addTask(value);
-                                                          }
-                                                        },
-                                                        onEditingComplete: () {
-                                                          // Handle Return/Enter key press
-                                                          if (_taskController.text.isNotEmpty) {
-                                                            _addTask(_taskController.text);
-                                                          }
-                                                        },
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              );
-                                            }
-                                            
-                                            // "Add new task" line at the bottom
-                                            if (!_isAddingNewTask && index == _tasks.length) {
-                                              return Padding(
-                                                key: Key('add_new_task'),
-                                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                                child: MouseRegion(
-                                                  cursor: SystemMouseCursors.click,
-                                                  child: GestureDetector(
-                                                    behavior: HitTestBehavior.opaque,
-                                                    onTap: () {
-                                                      setState(() {
-                                                        _isAddingNewTask = true;
-                                                        _editingIndex = null;
-                                                        _taskController.clear();
-                                                      });
-                                                      // Ensure focus and cursor are visible
-                                                      _focusTextField();
-                                                    },
-                                                    child: Row(
-                                                      children: [
-                                                        // Add some padding to align with other tasks
-                                                        SizedBox(width: 32),
-                                                        Text(
-                                                          "+ Add new task",
-                                                          style: TextStyle(
-                                                            color: Colors.grey.shade600,
-                                                            fontSize: 14,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              );
-                                            }
-                                            
-                                            // Editing existing task
-                                            if (_editingIndex == index) {
-                                              return Padding(
-                                                key: Key('editing_task_${index}'),
-                                                padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                                child: Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                                  children: [
-                                                    // Checkbox
-                                                    Material(
-                                                      type: MaterialType.transparency,
-                                                      child: Checkbox(
-                                                        value: _tasks[index].isCompleted,
-                                                        onChanged: (value) {
-                                                          _toggleTask(index);
-                                                        },
-                                                        activeColor: Colors.black,
-                                                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                        visualDensity: VisualDensity.compact,
-                                                        hoverColor: Colors.transparent,
-                                                        focusColor: Colors.transparent,
-                                                        splashRadius: 0,
-                                                      ),
-                                                    ),
-                                                    SizedBox(width: 4),
-                                                    // Text field for editing
-                                                    Expanded(
-                                                      child: TextField(
-                                                        controller: _taskController,
-                                                        focusNode: _taskFocusNode,
-                                                        selectionControls: _textSelectionControls,
-                                                        decoration: InputDecoration(
-                                                          border: InputBorder.none,
-                                                          isDense: true,
-                                                          contentPadding: EdgeInsets.zero,
-                                                          focusedBorder: InputBorder.none,
-                                                          enabledBorder: InputBorder.none,
-                                                        ),
-                                                        style: TextStyle(
-                                                          color: Colors.black87,
-                                                          fontSize: 14,
-                                                          decoration: _tasks[index].isCompleted
-                                                              ? TextDecoration.lineThrough
-                                                              : null,
-                                                          decorationColor: Colors.black54,
-                                                        ),
-                                                        cursorColor: Colors.black,
-                                                        cursorWidth: 1.5,
-                                                        showCursor: true,
-                                                        autofocus: true,
-                                                        enableInteractiveSelection: true,
-                                                        keyboardType: TextInputType.text,
-                                                        textInputAction: TextInputAction.next,
-                                                        onSubmitted: (value) {
-                                                          if (value.isNotEmpty) {
-                                                            _saveEditedTask(index, value);
-                                                            // After editing, move to adding a new task
-                                                            setState(() {
-                                                              _isAddingNewTask = true;
-                                                              _taskController.clear();
-                                                            });
-                                                            // Focus the text field and make cursor visible
-                                                            _focusTextField();
-                                                          }
-                                                        },
-                                                        onEditingComplete: () {
-                                                          // Also handle Return/Enter key press
-                                                          if (_taskController.text.isNotEmpty) {
-                                                            _saveEditedTask(index, _taskController.text);
-                                                            // After editing, move to adding a new task
-                                                            setState(() {
-                                                              _isAddingNewTask = true;
-                                                              _taskController.clear();
-                                                            });
-                                                            // Focus the text field and make cursor visible
-                                                            _focusTextField();
-                                                          } else if (_taskController.text.isEmpty) {
-                                                            setState(() {
-                                                              _editingIndex = null;
-                                                            });
-                                                          }
-                                                        },
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              );
-                                            }
-                                            
-                                            // Regular task display
-                                            return Padding(
-                                              key: Key(_tasks[index].title + index.toString()),
-                                              padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                              child: MouseRegion(
-                                                onEnter: (_) => setState(() => _hoveredIndex = index),
-                                                onExit: (_) => setState(() => _hoveredIndex = null),
-                                                cursor: SystemMouseCursors.grab,
-                                                child: ReorderableDragStartListener(
-                                                  index: index,
-                                                  child: GestureDetector(
-                                                    onTap: () => _startEditingTask(index),
-                                                    behavior: HitTestBehavior.opaque,
-                                                    child: Row(
-                                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                                      children: [
-                                                        // Checkbox
-                                                        GestureDetector(
-                                                          onTap: () => _toggleTask(index),
-                                                          child: Material(
-                                                            type: MaterialType.transparency,
-                                                            child: Checkbox(
-                                                              value: _tasks[index].isCompleted,
-                                                              onChanged: null,
-                                                              activeColor: Colors.black,
-                                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                              visualDensity: VisualDensity.compact,
-                                                              hoverColor: Colors.transparent,
-                                                              focusColor: Colors.transparent,
-                                                              splashRadius: 0,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        SizedBox(width: 4),
-                                                        // Task text
-                                                        Expanded(
-                                                          child: Text(
-                                                            _tasks[index].title,
-                                                            style: TextStyle(
-                                                              color: Colors.black87,
-                                                              fontSize: 14,
-                                                              decoration: _tasks[index].isCompleted
-                                                                  ? TextDecoration.lineThrough
-                                                                  : null,
-                                                              decorationColor: Colors.black54,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        // Show delete icon on hover
-                                                        if (_hoveredIndex == index)
-                                                          MouseRegion(
-                                                            cursor: SystemMouseCursors.click,
-                                                            child: GestureDetector(
-                                                              onTap: () => _deleteTask(index),
-                                                              child: Padding(
-                                                                padding: const EdgeInsets.only(left: 8.0),
-                                                                child: Icon(
-                                                                  Icons.close,
-                                                                  size: 16,
-                                                                  color: Colors.grey.shade400,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    ),
-                                                  ),
+                                            SizedBox(width: 4),
+                                            // Task text
+                                            Expanded(
+                                              child: Text(
+                                                task.title,
+                                                style: TextStyle(
+                                                  color: Colors.black87,
+                                                  fontSize: 14,
+                                                  decoration: task.isCompleted
+                                                      ? TextDecoration.lineThrough
+                                                      : null,
+                                                  decorationColor: Colors.black54,
                                                 ),
                                               ),
-                                            );
-                                          },
+                                            ),
+                                          ],
                                         ),
-                                ),
-                              ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                        ),
-                      ],
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
