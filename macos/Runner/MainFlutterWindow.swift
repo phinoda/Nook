@@ -109,10 +109,7 @@ class MainFlutterWindow: NSWindow {
     let screenFrame = screen.visibleFrame
     let rightEdge = screenFrame.maxX
     let distanceFromEdge = rightEdge - mouseLocation.x
-    
-    // Add debug print to see mouse position (uncomment for debugging)
-    // print("Mouse position: \(mouseLocation.x), \(mouseLocation.y), Distance: \(distanceFromEdge)")
-    
+        
     // Check if mouse is within threshold from right edge
     if distanceFromEdge <= edgeThreshold {
       if !windowVisible && !windowPeeking {
@@ -182,7 +179,6 @@ class MainFlutterWindow: NSWindow {
       
       windowVisible = false
       windowPeeking = false
-      print("Window should now be hidden")
     }
   }
 }

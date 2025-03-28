@@ -8,36 +8,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
-// Custom text selection controls with minimal visual feedback
-class MinimalTextSelectionControls extends TextSelectionControls {
+// Updated MinimalTextSelectionControls class with correct method signatures
+class MinimalTextSelectionControls extends MaterialTextSelectionControls {
   @override
-  Widget buildHandle(BuildContext context, TextSelectionHandleType type, double textLineHeight, [VoidCallback? onTap]) {
-    return Container(width: 0, height: 0); // Invisible handle
-  }
-
+  bool canCut(TextSelectionDelegate delegate) => false;
+  
   @override
-  Widget buildToolbar(
-    BuildContext context,
-    Rect globalEditableRegion,
-    double textLineHeight,
-    Offset position,
-    List<TextSelectionPoint> endpoints,
-    TextSelectionDelegate delegate,
-    ValueListenable<ClipboardStatus>? clipboardStatus,
-    Offset? lastSecondaryTapDownPosition,
-  ) {
-    return Container(); // Empty toolbar
-  }
-
+  bool canCopy(TextSelectionDelegate delegate) => false;
+  
   @override
-  Offset getHandleAnchor(TextSelectionHandleType type, double textLineHeight) {
-    return Offset.zero;
-  }
-
+  bool canSelectAll(TextSelectionDelegate delegate) => false;
+  
   @override
-  Size getHandleSize(double textLineHeight) {
-    return Size(0, 0); // Zero size handle
-  }
+  bool canPaste(TextSelectionDelegate delegate) => false;
+  
+  @override
+  void handleCut(TextSelectionDelegate delegate) {}
+  
+  @override
+  void handleCopy(TextSelectionDelegate delegate) {}
+  
+  @override
+  Future<void> handlePaste(TextSelectionDelegate delegate) async {}
+  
+  @override
+  void handleSelectAll(TextSelectionDelegate delegate) {}
 }
 
 void main() {
@@ -163,12 +158,14 @@ class _MyHomePageState extends State<MyHomePage> {
   static const platform = MethodChannel('com.example.nook/window');
   final TextEditingController _taskController = TextEditingController();
   final FocusNode _taskFocusNode = FocusNode();
-  final MinimalTextSelectionControls _textSelectionControls = MinimalTextSelectionControls();
   
   // Task management state
   List<Task> _tasks = [];
   int? _hoveredIndex;
   int? _editingIndex;
+
+  // Add these state variables to track indentation
+  Map<String, int> _taskIndentLevels = {}; // Maps task ID to indent level
 
   @override
   void initState() {
@@ -190,22 +187,7 @@ class _MyHomePageState extends State<MyHomePage> {
     
     // Load saved tasks
     _loadTasks();
-    
-    // Set up focus listener to handle task deletion when losing focus
-    _taskFocusNode.addListener(() {
-      if (!_taskFocusNode.hasFocus && _editingIndex != null) {
-        if (_taskController.text.isEmpty) {
-          // Delete task when focus is lost and the field is empty
-          setState(() {
-            if (_editingIndex! < _tasks.length) {
-              _tasks.removeAt(_editingIndex!);
-              _editingIndex = null;
-              _saveTasks();
-            }
-          });
-        }
-      }
-    });
+    _loadTaskIndentation(); // Load task indentation levels
   }
 
   @override
@@ -323,15 +305,11 @@ class _MyHomePageState extends State<MyHomePage> {
   
   // Create a new task after the current task being edited
   void _createNewTaskAfter(int index) {
-    // Make sure we have a valid index
-    if (index < 0 || index >= _tasks.length) {
-      return;
-    }
-    
-    // First save any changes to the current task
+    // First save the current task content
     if (_editingIndex != null && _editingIndex! < _tasks.length) {
       final currentIndex = _editingIndex!;
       
+      // Save the current task's content
       setState(() {
         // Update the current task with whatever content it has
         final Task updatedTask = Task(
@@ -343,20 +321,31 @@ class _MyHomePageState extends State<MyHomePage> {
         // Replace the task at the index
         _tasks[currentIndex] = updatedTask;
       });
+      
+      // Save changes
+      _saveTasks();
     }
     
-    // Create a new task after the current one
+    // Then create a new empty task after it
     setState(() {
       // Insert a new empty task at the index after the current one
-      _tasks.insert(index + 1, Task(title: ''));
+      final Task newTask = Task(title: '');
+      _tasks.insert(index + 1, newTask);
       
-      // Start editing the new task
+      // Get the indentation level of the current task
+      final int currentTaskIndent = _taskIndentLevels[_tasks[index].id] ?? 0;
+      
+      // Set the new task's indentation to match the current task's indentation
+      _taskIndentLevels[newTask.id] = currentTaskIndent;
+      
+      // Set editing to the new task
       _editingIndex = index + 1;
       _taskController.clear();
     });
     
-    // Save all tasks
+    // Save tasks with the new empty one included
     _saveTasks();
+    _saveTaskIndentation();
     
     // Ensure the text field is focused with visible cursor
     _focusTextField();
@@ -401,47 +390,40 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Ensure text field gets focus with visible cursor
   void _focusTextField() {
-    // First request focus
-    _taskFocusNode.requestFocus();
-    
-    // Make sure the widget updates with the cursor visible immediately
-    setState(() {});
-    
-    // Use a small delay to ensure the cursor is visible
-    Future.delayed(Duration(milliseconds: 50), () {
-      if (_taskFocusNode.hasFocus) {
-        // Force cursor position
-        _taskController.selection = TextSelection.fromPosition(
-          TextPosition(offset: _taskController.text.length),
-        );
-        setState(() {});
-      } else {
-        // If focus was lost somehow, try again
-        _taskFocusNode.requestFocus();
-        setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _taskFocusNode.requestFocus();
+      
+      // Ensure cursor is positioned at the end of the text
+      if (_taskController.text.isNotEmpty) {
+        _taskController.selection = TextSelection.collapsed(offset: _taskController.text.length);
       }
+      
+      // Force additional refresh to ensure cursor visibility
+      setState(() {});
     });
   }
 
   // Start editing a task
-  void _startEditingTask(int index) {
-    // Check index bounds
-    if (index < 0 || index >= _tasks.length) {
-      return;
-    }
-    
-    // Save any current editing first
+  void _startEditingTask(int index, {bool shouldUnfocus = true}) {
+    if (index < 0 || index >= _tasks.length) return;
+
     if (_editingIndex != null) {
       _saveCurrentEditing();
     }
-    
+
     setState(() {
       _editingIndex = index;
       _taskController.text = _tasks[index].title;
     });
-    
-    // Focus on the text field for editing with visible cursor
-    _focusTextField();
+
+    if (shouldUnfocus) {
+      _taskFocusNode.unfocus(); 
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _taskFocusNode.requestFocus();
+      _taskController.selection = TextSelection.collapsed(offset: _taskController.text.length);
+    });
   }
 
   // Toggle task completion
@@ -548,6 +530,163 @@ class _MyHomePageState extends State<MyHomePage> {
     return flattenedTasks;
   }
 
+  // Method to indent a task and all its children by one level, with constraints
+  void _indentTask(int index) {
+    // Check if this task can be indented (not the first task)
+    if (index <= 0 || index >= _tasks.length) {
+      return; // Can't indent the first task or invalid indices
+    }
+    
+    // Get the current task ID and the task above it
+    final String taskId = _tasks[index].id;
+    final String previousTaskId = _tasks[index - 1].id;
+    
+    // Get current indent levels
+    final int currentIndent = _taskIndentLevels[taskId] ?? 0;
+    final int previousTaskIndent = _taskIndentLevels[previousTaskId] ?? 0;
+    
+    // CONSTRAINT: Only allow indent if current indent is not already deeper than previous task
+    // A task can only be indented one level deeper than the task above it
+    if (currentIndent <= previousTaskIndent) {
+      setState(() {
+        // Increase indent by 1, but never more than one level deeper than previous task
+        _taskIndentLevels[taskId] = currentIndent + 1;
+        
+        // Calculate the indent change
+        final int indentChange = (previousTaskIndent + 1) - currentIndent;
+        
+        // Find all child tasks (tasks that are currently indented more than this task)
+        final List<int> childIndices = [];
+        final List<int> childCurrentIndents = [];
+        
+        // Store the parent's new indent level
+        final int newParentIndent = previousTaskIndent + 1;
+        
+        // Start checking from the task after the parent
+        for (int i = index + 1; i < _tasks.length; i++) {
+          final String childTaskId = _tasks[i].id;
+          final int childIndent = _taskIndentLevels[childTaskId] ?? 0;
+          
+          // A child task has a greater indent level than the parent's original level
+          if (childIndent <= currentIndent) {
+            // We've found a task that's not a child of this task
+            break;
+          }
+          
+          // Store the child index and its current indent level
+          childIndices.add(i);
+          childCurrentIndents.add(childIndent);
+        }
+        
+        // Now update all child tasks with the same indent change
+        for (int i = 0; i < childIndices.length; i++) {
+          final int childIndex = childIndices[i];
+          final int childCurrentIndent = childCurrentIndents[i];
+          final String childTaskId = _tasks[childIndex].id;
+          
+          // Apply the same indent change to the child
+          _taskIndentLevels[childTaskId] = childCurrentIndent + indentChange;
+        }
+      });
+      
+      // Save the indentation state
+      _saveTaskIndentation();
+    }
+  }
+
+  // Method to outdent a task and all its children
+  void _outdentTask(int index) {
+    if (index < 0 || index >= _tasks.length) {
+      return; // Invalid index
+    }
+    
+    final String taskId = _tasks[index].id;
+    final int currentIndent = _taskIndentLevels[taskId] ?? 0;
+    
+    if (currentIndent > 0) {
+      setState(() {
+        // Calculate the indent change (how much we're decreasing indent by)
+        final int indentChange = -1; // Always reduce by 1 level
+        
+        // Reduce indent level by 1
+        _taskIndentLevels[taskId] = currentIndent - 1;
+        
+        // Find and outdent all child tasks
+        _indentChildTasks(index, indentChange);
+      });
+      
+      // Save the indentation state
+      _saveTaskIndentation();
+    }
+  }
+
+  // Helper method to identify and update indent levels of child tasks
+  void _indentChildTasks(int parentIndex, int indentChange) {
+    if (parentIndex >= _tasks.length - 1) {
+      return; // No tasks after this one
+    }
+    
+    final int parentIndent = _taskIndentLevels[_tasks[parentIndex].id] ?? 0;
+    
+    // Start checking from the task after the parent
+    for (int i = parentIndex + 1; i < _tasks.length; i++) {
+      final String childTaskId = _tasks[i].id;
+      final int childIndent = _taskIndentLevels[childTaskId] ?? 0;
+      
+      // A child task has a greater indent level than the parent
+      // Once we find a task with indent level <= parent's, we're out of the parent's children
+      if (childIndent <= parentIndent) {
+        break;
+      }
+      
+      // Update the child's indent level
+      _taskIndentLevels[childTaskId] = childIndent + indentChange;
+    }
+  }
+
+  // Save task indentation levels
+  Future<void> _saveTaskIndentation() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Convert indent levels to a format that can be stored
+    final Map<String, dynamic> indentData = {};
+    _taskIndentLevels.forEach((taskId, level) {
+      indentData[taskId] = level;
+    });
+    
+    await prefs.setString('task_indentation', json.encode(indentData));
+  }
+
+  // Load task indentation levels
+  Future<void> _loadTaskIndentation() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? indentData = prefs.getString('task_indentation');
+    
+    if (indentData != null) {
+      final Map<String, dynamic> decodedData = json.decode(indentData);
+      
+      setState(() {
+        _taskIndentLevels = Map<String, int>.from(
+          decodedData.map((key, value) => MapEntry(key, value as int))
+        );
+      });
+    }
+  }
+
+  // Add a task-specific event handler for the Enter key
+  bool _handleKeyPress(RawKeyEvent event) {
+    if (event is RawKeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.enter || 
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        if (_editingIndex != null) {
+          _createNewTaskAfter(_editingIndex!);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     // For now, let's keep using the flat _tasks list for reordering
@@ -569,14 +708,23 @@ class _MyHomePageState extends State<MyHomePage> {
                 return KeyEventResult.handled;
               }
               
-              // Handle Tab key to nest current task
-              if (event.logicalKey == LogicalKeyboardKey.tab && 
-                  _editingIndex != null && _editingIndex! > 0) {
-                // Nest the current task under the task above it
-                _nestTaskUnderParent(_editingIndex!);
+              // Only handle Tab and Shift+Tab here
+              if (_editingIndex != null && 
+                  event.logicalKey == LogicalKeyboardKey.tab) {
+                
+                // Check if shift is pressed
+                if (HardwareKeyboard.instance.isShiftPressed) {
+                  // Shift+Tab - outdent the task
+                  _outdentTask(_editingIndex!);
+                } else {
+                  // Tab - indent the task
+                  _indentTask(_editingIndex!);
+                }
                 return KeyEventResult.handled;
               }
               
+              // Remove the Enter key handling from here since we're handling it in the TextField
+
               // Check for Delete key to delete current task
               if (_editingIndex != null && 
                   (event.logicalKey == LogicalKeyboardKey.delete || 
@@ -735,12 +883,19 @@ class _MyHomePageState extends State<MyHomePage> {
                                 
                                 // Editing existing task
                                 if (_editingIndex == index) {
+                                  final int indentLevel = _taskIndentLevels[task.id] ?? 0;
+                                  
                                   return Padding(
                                     key: Key('editing_task_${task.id}'),
                                     padding: const EdgeInsets.symmetric(vertical: 4.0),
                                     child: Row(
+                                      key: ValueKey('editing_row_${task.id}'),
                                       crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
+                                        // Add indentation based on level
+                                        if (indentLevel > 0) 
+                                          SizedBox(width: 20.0 * indentLevel),
+                                        
                                         // Checkbox
                                         GestureDetector(
                                           onTap: () => _toggleTask(index),
@@ -774,9 +929,9 @@ class _MyHomePageState extends State<MyHomePage> {
                                         // Text field for editing
                                         Expanded(
                                           child: TextField(
+                                            key: ValueKey(task.id),
                                             controller: _taskController,
                                             focusNode: _taskFocusNode,
-                                            selectionControls: _textSelectionControls,
                                             decoration: InputDecoration(
                                               border: InputBorder.none,
                                               hintText: 'Task name...',
@@ -794,11 +949,12 @@ class _MyHomePageState extends State<MyHomePage> {
                                             cursorWidth: 1.5,
                                             showCursor: true,
                                             autofocus: true,
-                                            enableInteractiveSelection: true,
                                             keyboardType: TextInputType.text,
                                             textInputAction: TextInputAction.next,
                                             onSubmitted: (value) {
-                                              _createNewTaskAfter(index);
+                                              if (_editingIndex != null) {
+                                                _createNewTaskAfter(_editingIndex!);
+                                              }
                                             },
                                           ),
                                         ),
@@ -808,6 +964,8 @@ class _MyHomePageState extends State<MyHomePage> {
                                 }
                                 
                                 // Regular task display
+                                final int indentLevel = _taskIndentLevels[task.id] ?? 0;
+                                
                                 return Padding(
                                   key: Key('task_${task.id}'),
                                   padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -823,6 +981,10 @@ class _MyHomePageState extends State<MyHomePage> {
                                         child: Row(
                                           crossAxisAlignment: CrossAxisAlignment.center,
                                           children: [
+                                            // Add indentation based on level
+                                            if (indentLevel > 0) 
+                                              SizedBox(width: 20.0 * indentLevel),
+                                            
                                             // Checkbox
                                             GestureDetector(
                                               onTap: () => _toggleTask(index),
