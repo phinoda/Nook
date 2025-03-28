@@ -151,7 +151,6 @@ class MainFlutterWindow: NSWindow {
       }
       
       windowVisible = true
-      print("Window should now be fully visible")
     }
   }
   
@@ -169,7 +168,6 @@ class MainFlutterWindow: NSWindow {
     
     windowPeeking = true
     windowVisible = false
-    print("Window should now be peeking")
   }
   
   private func hideAppWindow() {

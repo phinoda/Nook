@@ -105,26 +105,45 @@ class MyApp extends StatelessWidget {
 class Task {
   String title;
   bool isCompleted;
-  String id; // Add an ID field for stable key generation
+  String id;
+  List<Task> subtasks;
   
-  Task({required this.title, this.isCompleted = false, String? id})
-      : this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString();
+  Task({
+    required this.title, 
+    this.isCompleted = false, 
+    String? id,
+    List<Task>? subtasks
+  }) : 
+    this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString(),
+    this.subtasks = subtasks ?? [];
   
   // Convert Task to JSON
   Map<String, dynamic> toJson() {
     return {
       'title': title,
       'isCompleted': isCompleted,
-      'id': id, // Include ID in JSON serialization
+      'id': id,
+      'subtasks': subtasks.map((subtask) => subtask.toJson()).toList(),
     };
   }
   
   // Create Task from JSON
-  factory Task.fromJson(Map<String, dynamic> json) {
+  static Task fromJson(Map<String, dynamic> json) {
+    // Ensure we handle null subtasks properly
+    List<dynamic>? subtasksJson = json['subtasks'] as List<dynamic>?;
+    List<Task> parsedSubtasks = [];
+    
+    if (subtasksJson != null) {
+      parsedSubtasks = subtasksJson
+          .map((subtaskJson) => Task.fromJson(subtaskJson as Map<String, dynamic>))
+          .toList();
+    }
+    
     return Task(
-      title: json['title'],
-      isCompleted: json['isCompleted'],
-      id: json['id'], // Read ID from JSON
+      title: json['title'] as String,
+      isCompleted: json['isCompleted'] as bool,
+      id: json['id'] as String,
+      subtasks: parsedSubtasks,
     );
   }
 }
@@ -491,29 +510,79 @@ class _MyHomePageState extends State<MyHomePage> {
     _saveTasks();
   }
 
+  // Simplified nesting function to get core functionality working
+  void _nestTaskUnderParent(int index) {
+    // Check if this task can be nested (not the first task)
+    if (index <= 0 || index >= _tasks.length) {
+      return; // Can't nest the first task or invalid indices
+    }
+    
+    // Save the current task content
+    String taskContent = _taskController.text;
+    
+    setState(() {
+      // Create an indentation marker to simulate nesting
+      _taskController.text = "    " + taskContent; // Add 4 spaces to indent
+    });
+    
+    // For now, this is a visual indication of nesting
+    // In a future update, we can implement actual task hierarchy
+    
+    _focusTextField(); // Keep focus on the text field
+  }
+
+  // Add this to your state class
+  List<MapEntry<Task, int>> _getFlattenedTasks() {
+    List<MapEntry<Task, int>> flattenedTasks = [];
+    
+    void _flattenTaskList(List<Task> tasks, int level) {
+      for (var task in tasks) {
+        flattenedTasks.add(MapEntry(task, level));
+        if (task.subtasks.isNotEmpty) {
+          _flattenTaskList(task.subtasks, level + 1);
+        }
+      }
+    }
+    
+    _flattenTaskList(_tasks, 0);
+    return flattenedTasks;
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Get the primary display size
-    final flutterView = ui.PlatformDispatcher.instance.views.first;
-    final devicePixelRatio = flutterView.devicePixelRatio;
-    
-    // For macOS, we can get the screen size this way
-    final screenWidth = WidgetsBinding.instance.window.physicalSize.width / devicePixelRatio;
-    final screenHeight = WidgetsBinding.instance.window.physicalSize.height / devicePixelRatio;
+    // For now, let's keep using the flat _tasks list for reordering
+    // We'll handle subtasks display separately
     
     return Container(
       width: 350, // Fixed width of 350
-      height: screenHeight, // Full screen height
+      height: WidgetsBinding.instance.window.physicalSize.height / WidgetsBinding.instance.window.devicePixelRatio, // Full screen height
       child: Material(
         type: MaterialType.transparency,
         child: Focus(
           autofocus: true,
           onKeyEvent: (FocusNode node, KeyEvent event) {
             if (event is KeyDownEvent) {
-              // Check for Command+N shortcut to create a new task at the top
+              // Handle Command+N shortcut to create a new task at the top
               if (event.logicalKey == LogicalKeyboardKey.keyN && 
                   (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed)) {
                 _createNewTaskAt(0);
+                return KeyEventResult.handled;
+              }
+              
+              // Handle Tab key to nest current task
+              if (event.logicalKey == LogicalKeyboardKey.tab && 
+                  _editingIndex != null && _editingIndex! > 0) {
+                // Nest the current task under the task above it
+                _nestTaskUnderParent(_editingIndex!);
+                return KeyEventResult.handled;
+              }
+              
+              // Check for Delete key to delete current task
+              if (_editingIndex != null && 
+                  (event.logicalKey == LogicalKeyboardKey.delete || 
+                  event.logicalKey == LogicalKeyboardKey.backspace) && 
+                  _taskController.text.isEmpty) {
+                _deleteTask(_editingIndex!);
                 return KeyEventResult.handled;
               }
             }
@@ -604,14 +673,11 @@ class _MyHomePageState extends State<MyHomePage> {
                               onTap: _createFirstTask,
                               behavior: HitTestBehavior.opaque,
                               child: Center(
-                                child: MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  child: Text(
-                                    "create your first task",
-                                    style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 16,
-                                    ),
+                                child: Text(
+                                  "Create your first task",
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 16,
                                   ),
                                 ),
                               ),
@@ -621,35 +687,15 @@ class _MyHomePageState extends State<MyHomePage> {
                               itemCount: _tasks.length,
                               buildDefaultDragHandles: false,
                               proxyDecorator: (child, index, animation) {
-                                return AnimatedBuilder(
-                                  animation: animation,
-                                  builder: (BuildContext context, Widget? child) {
-                                    final double animValue = Curves.easeInOut.transform(animation.value);
-                                    final double elevation = lerpDouble(0, 6, animValue)!;
-                                    return Material(
-                                      elevation: elevation,
-                                      color: Colors.white,
-                                      shadowColor: Colors.black26,
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: child,
-                                    );
-                                  },
+                                return Material(
+                                  elevation: 2,
+                                  color: Colors.white,
+                                  shadowColor: Colors.black26,
+                                  borderRadius: BorderRadius.circular(4),
                                   child: child,
                                 );
                               },
                               onReorder: (int oldIndex, int newIndex) {
-                                // First check the bounds
-                                if (oldIndex < 0 || oldIndex >= _tasks.length || 
-                                    newIndex < 0 || newIndex > _tasks.length) {
-                                  return; // Prevent out-of-bounds operations
-                                }
-                                
-                                // Create a local reference to avoid potential null issues
-                                final Task? taskToMove = _tasks.length > oldIndex ? _tasks[oldIndex] : null;
-                                if (taskToMove == null) {
-                                  return; // Don't proceed if the task doesn't exist
-                                }
-                                
                                 setState(() {
                                   // Save any current editing
                                   if (_editingIndex != null) {
@@ -661,14 +707,9 @@ class _MyHomePageState extends State<MyHomePage> {
                                     newIndex -= 1;
                                   }
                                   
-                                  // Final bounds check after adjustment
-                                  if (newIndex >= _tasks.length) {
-                                    newIndex = _tasks.length - 1;
-                                  }
-                                  
-                                  // Move the task safely
-                                  _tasks.removeAt(oldIndex);
-                                  _tasks.insert(newIndex, taskToMove);
+                                  // Move the task
+                                  final Task movedTask = _tasks.removeAt(oldIndex);
+                                  _tasks.insert(newIndex, movedTask);
                                   
                                   // Update editing index if necessary
                                   if (_editingIndex != null) {
@@ -689,12 +730,8 @@ class _MyHomePageState extends State<MyHomePage> {
                                 if (index < 0 || index >= _tasks.length) {
                                   return SizedBox.shrink(key: Key('invalid_index_$index'));
                                 }
-
-                                // Check if task exists at this index
-                                final Task? task = _tasks[index];
-                                if (task == null) {
-                                  return SizedBox.shrink(key: Key('null_task_$index'));
-                                }
+                                
+                                final task = _tasks[index];
                                 
                                 // Editing existing task
                                 if (_editingIndex == index) {
@@ -705,20 +742,35 @@ class _MyHomePageState extends State<MyHomePage> {
                                       crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
                                         // Checkbox
-                                        Material(
-                                          type: MaterialType.transparency,
-                                          child: Checkbox(
-                                            value: task.isCompleted,
-                                            onChanged: (value) => _toggleTask(index),
-                                            activeColor: Colors.black,
-                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                            visualDensity: VisualDensity.compact,
-                                            hoverColor: Colors.transparent,
-                                            focusColor: Colors.transparent,
-                                            splashRadius: 0,
+                                        GestureDetector(
+                                          onTap: () => _toggleTask(index),
+                                          child: Material(
+                                            type: MaterialType.transparency,
+                                            child: Checkbox(
+                                              value: task.isCompleted,
+                                              onChanged: (value) => _toggleTask(index),
+                                              activeColor: Colors.black,
+                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              visualDensity: VisualDensity.compact,
+                                              hoverColor: Colors.transparent,
+                                              focusColor: Colors.transparent,
+                                              splashRadius: 0,
+                                            ),
                                           ),
                                         ),
                                         SizedBox(width: 4),
+                                        
+                                        // Indicate if task has subtasks
+                                        if (task.subtasks.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(right: 4.0),
+                                            child: Icon(
+                                              Icons.subdirectory_arrow_right,
+                                              size: 14,
+                                              color: Colors.grey.shade400,
+                                            ),
+                                          ),
+                                        
                                         // Text field for editing
                                         Expanded(
                                           child: TextField(
@@ -746,7 +798,6 @@ class _MyHomePageState extends State<MyHomePage> {
                                             keyboardType: TextInputType.text,
                                             textInputAction: TextInputAction.next,
                                             onSubmitted: (value) {
-                                              // Create a new task entry after the current one when Enter is pressed
                                               _createNewTaskAfter(index);
                                             },
                                           ),
@@ -790,6 +841,18 @@ class _MyHomePageState extends State<MyHomePage> {
                                               ),
                                             ),
                                             SizedBox(width: 4),
+                                            
+                                            // Indicate if task has subtasks
+                                            if (task.subtasks.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(right: 4.0),
+                                                child: Icon(
+                                                  Icons.subdirectory_arrow_right,
+                                                  size: 14,
+                                                  color: Colors.grey.shade400,
+                                                ),
+                                              ),
+                                            
                                             // Task text
                                             Expanded(
                                               child: Text(
