@@ -100,12 +100,14 @@ class MyApp extends StatelessWidget {
 class Task {
   String title;
   bool isCompleted;
+  bool isCollapsed;
   String id;
   List<Task> subtasks;
   
   Task({
     required this.title, 
     this.isCompleted = false, 
+    this.isCollapsed = false,
     String? id,
     List<Task>? subtasks
   }) : 
@@ -117,6 +119,7 @@ class Task {
     return {
       'title': title,
       'isCompleted': isCompleted,
+      'isCollapsed': isCollapsed,
       'id': id,
       'subtasks': subtasks.map((subtask) => subtask.toJson()).toList(),
     };
@@ -137,6 +140,7 @@ class Task {
     return Task(
       title: json['title'] as String,
       isCompleted: json['isCompleted'] as bool,
+      isCollapsed: json['isCollapsed'] as bool? ?? false,
       id: json['id'] as String,
       subtasks: parsedSubtasks,
     );
@@ -163,6 +167,8 @@ class _MyHomePageState extends State<MyHomePage> {
   List<Task> _tasks = [];
   int? _hoveredIndex;
   int? _editingIndex;
+  List<List<Task>> _undoStack = [];
+  List<List<Task>> _redoStack = [];
 
   // Add these state variables to track indentation
   Map<String, int> _taskIndentLevels = {}; // Maps task ID to indent level
@@ -282,6 +288,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Create a new empty task at the specified index and immediately edit it
   void _createNewTaskAt(int index) {
+    _snapshotTasks();
     // Save any current editing first
     if (_editingIndex != null) {
       _saveCurrentEditing();
@@ -305,6 +312,7 @@ class _MyHomePageState extends State<MyHomePage> {
   
   // Create a new task after the current task being edited
   void _createNewTaskAfter(int index) {
+    _snapshotTasks();
     // First save the current task content
     if (_editingIndex != null && _editingIndex! < _tasks.length) {
       final currentIndex = _editingIndex!;
@@ -315,6 +323,7 @@ class _MyHomePageState extends State<MyHomePage> {
         final Task updatedTask = Task(
           title: _taskController.text,
           isCompleted: _tasks[currentIndex].isCompleted,
+          isCollapsed: _tasks[currentIndex].isCollapsed,
           id: _tasks[currentIndex].id
         );
         
@@ -358,6 +367,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Save the task currently being edited
   void _saveCurrentEditing() {
+    _snapshotTasks();
     if (_editingIndex != null && _editingIndex! < _tasks.length) {
       final index = _editingIndex!;
       
@@ -375,6 +385,7 @@ class _MyHomePageState extends State<MyHomePage> {
           final Task updatedTask = Task(
             title: _taskController.text,
             isCompleted: _tasks[index].isCompleted,
+            isCollapsed: _tasks[index].isCollapsed,
             id: _tasks[index].id
           );
           
@@ -420,9 +431,14 @@ class _MyHomePageState extends State<MyHomePage> {
       _taskFocusNode.unfocus(); 
     }
 
+    // Ensure proper focus and cursor positioning
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _taskFocusNode.requestFocus();
-      _taskController.selection = TextSelection.collapsed(offset: _taskController.text.length);
+      if (_taskController.text.isNotEmpty) {
+        _taskController.selection = TextSelection.collapsed(offset: _taskController.text.length);
+      }
+      // Force a UI refresh to ensure cursor visibility
+      setState(() {});
     });
   }
 
@@ -433,6 +449,7 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     
+    _snapshotTasks();
     // Save any current editing first
     if (_editingIndex != null) {
       _saveCurrentEditing();
@@ -453,6 +470,7 @@ class _MyHomePageState extends State<MyHomePage> {
       final Task toggledTask = Task(
         title: taskToToggle.title,
         isCompleted: newCompletionState,
+        isCollapsed: taskToToggle.isCollapsed,
         id: taskToToggle.id // Keep the same ID
       );
       
@@ -473,6 +491,7 @@ class _MyHomePageState extends State<MyHomePage> {
           _tasks.add(toggledTask);
         }
       }
+      _taskIndentLevels.remove(toggledTask.id); // Remove indentation for completed task
     });
     
     _saveTasks();
@@ -480,6 +499,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Delete task
   void _deleteTask(int index) {
+    _snapshotTasks();
     setState(() {
       _tasks.removeAt(index);
       if (_editingIndex == index) {
@@ -532,6 +552,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Method to indent a task and all its children by one level, with constraints
   void _indentTask(int index) {
+    _snapshotTasks();
     // Check if this task can be indented (not the first task)
     if (index <= 0 || index >= _tasks.length) {
       return; // Can't indent the first task or invalid indices
@@ -596,6 +617,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Method to outdent a task and all its children
   void _outdentTask(int index) {
+    _snapshotTasks();
     if (index < 0 || index >= _tasks.length) {
       return; // Invalid index
     }
@@ -701,8 +723,17 @@ class _MyHomePageState extends State<MyHomePage> {
           autofocus: true,
           onKeyEvent: (FocusNode node, KeyEvent event) {
             if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.keyZ &&
+                  HardwareKeyboard.instance.isMetaPressed) {
+                if (HardwareKeyboard.instance.isShiftPressed) {
+                  _redo();
+                } else {
+                  _undo();
+                }
+                return KeyEventResult.handled;
+              }
               // Handle Command+N shortcut to create a new task at the top
-              if (event.logicalKey == LogicalKeyboardKey.keyN && 
+              if (event.logicalKey == LogicalKeyboardKey.keyN &&
                   (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed)) {
                 _createNewTaskAt(0);
                 return KeyEventResult.handled;
@@ -898,12 +929,20 @@ class _MyHomePageState extends State<MyHomePage> {
                                         
                                         // Checkbox
                                         GestureDetector(
-                                          onTap: () => _toggleTask(index),
+                                          onTap: () {
+                                            if (index >= 0 && index < _tasks.length) {
+                                              _toggleTask(index);
+                                            }
+                                          },
                                           child: Material(
                                             type: MaterialType.transparency,
                                             child: Checkbox(
                                               value: task.isCompleted,
-                                              onChanged: (value) => _toggleTask(index),
+                                              onChanged: (value) {
+                                                if (index >= 0 && index < _tasks.length) {
+                                                  _toggleTask(index);
+                                                }
+                                              },
                                               activeColor: Colors.black,
                                               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                               visualDensity: VisualDensity.compact,
@@ -977,7 +1016,11 @@ class _MyHomePageState extends State<MyHomePage> {
                                       index: index,
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.translucent,
-                                        onTap: () => _startEditingTask(index),
+                                        onTap: () {
+                                          if (index >= 0 && index < _tasks.length) {
+                                            _startEditingTask(index);
+                                          }
+                                        },
                                         child: Row(
                                           crossAxisAlignment: CrossAxisAlignment.center,
                                           children: [
@@ -987,7 +1030,11 @@ class _MyHomePageState extends State<MyHomePage> {
                                             
                                             // Checkbox
                                             GestureDetector(
-                                              onTap: () => _toggleTask(index),
+                                              onTap: () {
+                                                if (index >= 0 && index < _tasks.length) {
+                                                  _toggleTask(index);
+                                                }
+                                              },
                                               child: Material(
                                                 type: MaterialType.transparency,
                                                 child: Checkbox(
@@ -1002,6 +1049,26 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 ),
                                               ),
                                             ),
+                                            // Collapse toggle button with safer handling
+                                            if (_tasks[index].subtasks.isNotEmpty)
+                                              GestureDetector(
+                                                onTap: () {
+                                                  if (index >= 0 && index < _tasks.length) {
+                                                    setState(() {
+                                                      _tasks[index].isCollapsed = !_tasks[index].isCollapsed;
+                                                      _saveTasks(); // Save the collapsed state
+                                                    });
+                                                  }
+                                                },
+                                                child: Padding(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                                  child: Icon(
+                                                    _tasks[index].isCollapsed ? Icons.expand_more : Icons.expand_less,
+                                                    size: 18,
+                                                    color: Colors.grey.shade400,
+                                                  ),
+                                                ),
+                                              ),
                                             SizedBox(width: 4),
                                             
                                             // Indicate if task has subtasks
@@ -1046,5 +1113,41 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
     );
+  }
+
+  void _snapshotTasks() {
+    _undoStack.add(_tasks.map((t) => Task(
+      title: t.title,
+      isCompleted: t.isCompleted,
+      isCollapsed: t.isCollapsed,
+      id: t.id,
+      subtasks: List<Task>.from(t.subtasks),
+    )).toList());
+    if (_undoStack.length > 50) {
+      _undoStack.removeAt(0);
+    }
+    _redoStack.clear();
+  }
+  
+  void _undo() {
+    if (_undoStack.isNotEmpty) {
+      _redoStack.add(_tasks);
+      _tasks = _undoStack.removeLast();
+      _editingIndex = null;
+      _taskController.clear();
+      setState(() {});
+      _saveTasks();
+    }
+  }
+  
+  void _redo() {
+    if (_redoStack.isNotEmpty) {
+      _undoStack.add(_tasks);
+      _tasks = _redoStack.removeLast();
+      _editingIndex = null;
+      _taskController.clear();
+      setState(() {});
+      _saveTasks();
+    }
   }
 }
