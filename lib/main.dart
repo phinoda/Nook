@@ -176,6 +176,11 @@ class _MyHomePageState extends State<MyHomePage> {
   // Add this state variable to track whether completed tasks are shown
   bool _showCompletedTasks = true;
 
+  bool _isTitleTask(Task task) {
+    final index = _tasks.indexOf(task);
+    return _hasIndentedChild(index);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -432,6 +437,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Toggle task completion
   void _toggleTask(int index) {
+    if (_isTitleTask(_tasks[index])) return;
     // Check index bounds
     if (index < 0 || index >= _tasks.length) {
       return;
@@ -904,49 +910,54 @@ class _MyHomePageState extends State<MyHomePage> {
                                 );
                               },
                               onReorder: (int oldIndex, int newIndex) {
-                                setState(() {
-                                  // Save any current editing
-                                  if (_editingIndex != null) {
-                                    _saveCurrentEditing();
-                                  }
-                                
-                                  // Map displayedTasks indices to actual _tasks indices
-                                  final int actualOldIndex = _tasks.indexOf(displayedTasks[oldIndex]);
-                                  
-                                  // Handle index adjustment when moving an item down
-                                  if (oldIndex < newIndex) {
-                                    newIndex -= 1;
-                                  }
-                                  
-                                  // Find the actual position in _tasks for the new index
-                                  int actualNewIndex;
-                                  if (newIndex >= displayedTasks.length) {
-                                    // If dropping at the end
-                                    actualNewIndex = _showCompletedTasks 
-                                        ? _tasks.length - 1
-                                        : _tasks.lastIndexWhere((task) => !task.isCompleted);
-                                  } else {
-                                    actualNewIndex = _tasks.indexOf(displayedTasks[newIndex]);
-                                  }
-                                  
-                                  // Move the task
-                                  final Task movedTask = _tasks.removeAt(actualOldIndex);
-                                  _tasks.insert(actualNewIndex, movedTask);
-                                  
-                                  // Update editing index if necessary
-                                  if (_editingIndex != null) {
-                                    if (_editingIndex == actualOldIndex) {
-                                      _editingIndex = actualNewIndex;
-                                    } else if (actualOldIndex < _editingIndex! && actualNewIndex >= _editingIndex!) {
-                                      _editingIndex = _editingIndex! - 1;
-                                    } else if (actualOldIndex > _editingIndex! && actualNewIndex <= _editingIndex!) {
-                                      _editingIndex = _editingIndex! + 1;
-                                    }
-                                  }
-                                });
-                                
-                                _saveTasks();
-                              },
+    setState(() {
+      if (_editingIndex != null) {
+        _saveCurrentEditing();
+      }
+
+      final Task movedTask = displayedTasks[oldIndex];
+      final int actualOldIndex = _tasks.indexOf(movedTask);
+
+      // Find all child tasks of the moved task
+      final List<Task> groupToMove = [movedTask];
+      final int parentIndent = _taskIndentLevels[movedTask.id] ?? 0;
+
+      for (int i = actualOldIndex + 1; i < _tasks.length; i++) {
+        final Task t = _tasks[i];
+        final int indent = _taskIndentLevels[t.id] ?? 0;
+        if (indent > parentIndent) {
+          groupToMove.add(t);
+        } else {
+          break;
+        }
+      }
+
+      // Remove the entire group from the _tasks list
+      _tasks.removeRange(actualOldIndex, actualOldIndex + groupToMove.length);
+
+      // Recalculate newIndex considering the removal
+      if (oldIndex < newIndex) {
+        newIndex -= groupToMove.length;
+      }
+
+      // Determine where to insert in actual _tasks
+      int actualNewIndex = newIndex >= displayedTasks.length
+          ? _tasks.length
+          : _tasks.indexOf(displayedTasks[newIndex]);
+
+      _tasks.insertAll(actualNewIndex, groupToMove);
+
+      // Adjust editing index if needed
+      if (_editingIndex != null) {
+        final movedIds = groupToMove.map((t) => t.id).toSet();
+        if (movedIds.contains(_tasks[_editingIndex!].id)) {
+          _editingIndex = actualNewIndex + groupToMove.indexWhere((t) => t.id == _tasks[_editingIndex!].id);
+        }
+      }
+    });
+
+    _saveTasks();
+  },
                               itemBuilder: (context, index) {
                                 // Check if index is valid
                                 if (index < 0 || index >= displayedTasks.length) {
@@ -971,31 +982,32 @@ class _MyHomePageState extends State<MyHomePage> {
                                         if (indentLevel > 0) 
                                           SizedBox(width: 20.0 * indentLevel),
                                         
-                                        // Checkbox
-                                        GestureDetector(
-                                          onTap: () {
-                                            if (index >= 0 && index < _tasks.length) {
-                                              _toggleTask(index);
-                                            }
-                                          },
-                                          child: Material(
-                                            type: MaterialType.transparency,
-                                            child: Checkbox(
-                                              value: task.isCompleted,
-                                              onChanged: (value) {
-                                                if (index >= 0 && index < _tasks.length) {
-                                                  _toggleTask(index);
-                                                }
-                                              },
-                                              activeColor: Colors.black,
-                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                              visualDensity: VisualDensity.compact,
-                                              hoverColor: Colors.transparent,
-                                              focusColor: Colors.transparent,
-                                              splashRadius: 0,
+                                        // Checkbox (only show if not a title)
+                                        if (!_isTitleTask(task))
+                                          GestureDetector(
+                                            onTap: () {
+                                              if (index >= 0 && index < _tasks.length) {
+                                                _toggleTask(index);
+                                              }
+                                            },
+                                            child: Material(
+                                              type: MaterialType.transparency,
+                                              child: Checkbox(
+                                                value: task.isCompleted,
+                                                onChanged: (value) {
+                                                  if (index >= 0 && index < _tasks.length) {
+                                                    _toggleTask(index);
+                                                  }
+                                                },
+                                                activeColor: Colors.black,
+                                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                visualDensity: VisualDensity.compact,
+                                                hoverColor: Colors.transparent,
+                                                focusColor: Colors.transparent,
+                                                splashRadius: 0,
+                                              ),
                                             ),
                                           ),
-                                        ),
                                         SizedBox(width: 4),
                                         
                                         // Indicate if task has subtasks
@@ -1027,6 +1039,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                             style: TextStyle(
                                               color: Colors.black87,
                                               fontSize: 14,
+                                              fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
                                             ),
                                             cursorColor: Colors.black,
                                             cursorWidth: 1.5,
@@ -1073,7 +1086,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                               SizedBox(width: 20.0 * indentLevel),
                                             
                                             // Checkbox
-                                            if (!_hasIndentedChild(actualIndex))
+                                            if (!_isTitleTask(task))
                                               GestureDetector(
                                                 onTap: () {
                                                   if (index >= 0 && index < _tasks.length) {
