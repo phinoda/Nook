@@ -173,6 +173,9 @@ class _MyHomePageState extends State<MyHomePage> {
   // Add these state variables to track indentation
   Map<String, int> _taskIndentLevels = {}; // Maps task ID to indent level
 
+  // Add this state variable to track whether completed tasks are shown
+  bool _showCompletedTasks = true;
+
   @override
   void initState() {
     super.initState();
@@ -668,12 +671,14 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // For now, let's keep using the flat _tasks list for reordering
-    // We'll handle subtasks display separately
+    // Create a filtered task list based on the toggle state
+    final List<Task> displayedTasks = _showCompletedTasks 
+        ? _tasks 
+        : _tasks.where((task) => !task.isCompleted).toList();
     
     return Container(
-      width: 350, // Fixed width of 350
-      height: WidgetsBinding.instance.window.physicalSize.height / WidgetsBinding.instance.window.devicePixelRatio, // Full screen height
+      width: 350,
+      height: WidgetsBinding.instance.window.physicalSize.height / WidgetsBinding.instance.window.devicePixelRatio,
       child: Material(
         type: MaterialType.transparency,
         child: Focus(
@@ -749,7 +754,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                     ),
                     
-                    // Progress bar showing task completion percentage
+                    // Progress bar and percentage
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
         child: Column(
@@ -766,7 +771,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   color: Colors.grey.shade700,
                                 ),
                               ),
-            Text(
+                              Text(
                                 "${(_calculateCompletionPercentage() * 100).toInt()}%",
                                 style: TextStyle(
                                   fontSize: 12,
@@ -796,21 +801,88 @@ class _MyHomePageState extends State<MyHomePage> {
                               ),
                             ),
                           ),
+                          
+                          // Increased spacing between progress bar and toggle
+                          SizedBox(height: 20),
+                          
+                          // Toggle for completed tasks
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+            Text(
+                                "Show completed tasks",
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                              // Custom-styled switch
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _showCompletedTasks = !_showCompletedTasks;
+                                    // Reset editing if the task being edited becomes hidden
+                                    if (_editingIndex != null && 
+                                        _editingIndex! < _tasks.length && 
+                                        _tasks[_editingIndex!].isCompleted && 
+                                        !_showCompletedTasks) {
+                                      _saveCurrentEditing();
+                                      _editingIndex = null;
+                                      _taskController.clear();
+                                    }
+                                  });
+                                },
+                                child: AnimatedContainer(
+                                  duration: Duration(milliseconds: 200),
+                                  width: 36,
+                                  height: 20,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: _showCompletedTasks ? Colors.black : Colors.grey.shade400,
+                                      width: 1.5,
+                                    ),
+                                    color: _showCompletedTasks ? Colors.black : Colors.transparent,
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      AnimatedPositioned(
+                                        duration: Duration(milliseconds: 200),
+                                        curve: Curves.easeInOut,
+                                        left: _showCompletedTasks ? 18 : 2,
+                                        top: 1.5,
+                                        child: Container(
+                                          width: 14,
+                                          height: 14,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: _showCompletedTasks ? Colors.white : Colors.grey.shade400,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
                     
                     SizedBox(height: 15),
                     
-                    // Todo List Section
+                    // Todo List Section - Use displayedTasks instead of _tasks
                     Expanded(
-                      child: _tasks.isEmpty
+                      child: displayedTasks.isEmpty
                           ? GestureDetector(
                               onTap: _createFirstTask,
                               behavior: HitTestBehavior.opaque,
                               child: Center(
                                 child: Text(
-                                  "Create your first task",
+                                  _tasks.isEmpty 
+                                      ? "Create your first task" 
+                                      : "No tasks to display",
                                   style: TextStyle(
                                     color: Colors.grey,
                                     fontSize: 16,
@@ -820,7 +892,7 @@ class _MyHomePageState extends State<MyHomePage> {
                             )
                           : ReorderableListView.builder(
                               padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-                              itemCount: _tasks.length,
+                              itemCount: displayedTasks.length,
                               buildDefaultDragHandles: false,
                               proxyDecorator: (child, index, animation) {
                                 return Material(
@@ -832,67 +904,60 @@ class _MyHomePageState extends State<MyHomePage> {
                                 );
                               },
                               onReorder: (int oldIndex, int newIndex) {
-  if (oldIndex < newIndex) {
-    newIndex -= 1;
-  }
-
-  final String movedTaskId = _tasks[oldIndex].id;
-  final int movedTaskIndent = _taskIndentLevels[movedTaskId] ?? 0;
-
-  // Collect the task and all its children
-  final List<Task> movingGroup = [ _tasks[oldIndex] ];
-  final List<String> movingGroupIds = [ movedTaskId ];
-  final List<int> movingGroupIndents = [ movedTaskIndent ];
-
-  for (int i = oldIndex + 1; i < _tasks.length; i++) {
-    final String childId = _tasks[i].id;
-    final int childIndent = _taskIndentLevels[childId] ?? 0;
-
-    if (childIndent > movedTaskIndent) {
-      movingGroup.add(_tasks[i]);
-      movingGroupIds.add(childId);
-      movingGroupIndents.add(childIndent);
-    } else {
-      break;
-    }
-  }
-
-  // Remove the group
-  _tasks.removeRange(oldIndex, oldIndex + movingGroup.length);
-
-  // Insert the group at newIndex
-  _tasks.insertAll(newIndex, movingGroup);
-
-  // Reapply indent levels
-  for (int i = 0; i < movingGroup.length; i++) {
-    _taskIndentLevels[movingGroupIds[i]] = movingGroupIndents[i];
-  }
-
-  // Update editing index
-  if (_editingIndex != null) {
-    if (_editingIndex! >= oldIndex && _editingIndex! < oldIndex + movingGroup.length) {
-      _editingIndex = newIndex + (_editingIndex! - oldIndex);
-    } else if (_editingIndex! < oldIndex && _editingIndex! >= newIndex) {
-      _editingIndex = _editingIndex! + movingGroup.length;
-    } else if (_editingIndex! > oldIndex && _editingIndex! < newIndex) {
-      _editingIndex = _editingIndex! - movingGroup.length;
-    }
-  }
-
-  _saveTasks();
-  _saveTaskIndentation();
-  setState(() {});
-},
+                                setState(() {
+                                  // Save any current editing
+                                  if (_editingIndex != null) {
+                                    _saveCurrentEditing();
+                                  }
+                                
+                                  // Map displayedTasks indices to actual _tasks indices
+                                  final int actualOldIndex = _tasks.indexOf(displayedTasks[oldIndex]);
+                                  
+                                  // Handle index adjustment when moving an item down
+                                  if (oldIndex < newIndex) {
+                                    newIndex -= 1;
+                                  }
+                                  
+                                  // Find the actual position in _tasks for the new index
+                                  int actualNewIndex;
+                                  if (newIndex >= displayedTasks.length) {
+                                    // If dropping at the end
+                                    actualNewIndex = _showCompletedTasks 
+                                        ? _tasks.length - 1
+                                        : _tasks.lastIndexWhere((task) => !task.isCompleted);
+                                  } else {
+                                    actualNewIndex = _tasks.indexOf(displayedTasks[newIndex]);
+                                  }
+                                  
+                                  // Move the task
+                                  final Task movedTask = _tasks.removeAt(actualOldIndex);
+                                  _tasks.insert(actualNewIndex, movedTask);
+                                  
+                                  // Update editing index if necessary
+                                  if (_editingIndex != null) {
+                                    if (_editingIndex == actualOldIndex) {
+                                      _editingIndex = actualNewIndex;
+                                    } else if (actualOldIndex < _editingIndex! && actualNewIndex >= _editingIndex!) {
+                                      _editingIndex = _editingIndex! - 1;
+                                    } else if (actualOldIndex > _editingIndex! && actualNewIndex <= _editingIndex!) {
+                                      _editingIndex = _editingIndex! + 1;
+                                    }
+                                  }
+                                });
+                                
+                                _saveTasks();
+                              },
                               itemBuilder: (context, index) {
                                 // Check if index is valid
-                                if (index < 0 || index >= _tasks.length) {
+                                if (index < 0 || index >= displayedTasks.length) {
                                   return SizedBox.shrink(key: Key('invalid_index_$index'));
                                 }
                                 
-                                final task = _tasks[index];
+                                final task = displayedTasks[index];
+                                final actualIndex = _tasks.indexOf(task);
                                 
                                 // Editing existing task
-                                if (_editingIndex == index) {
+                                if (_editingIndex == actualIndex) {
                                   final int indentLevel = _taskIndentLevels[task.id] ?? 0;
                                   
                                   return Padding(
@@ -1008,7 +1073,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                               SizedBox(width: 20.0 * indentLevel),
                                             
                                             // Checkbox
-                                            if (!_hasIndentedChild(index))
+                                            if (!_hasIndentedChild(actualIndex))
                                               GestureDetector(
                                                 onTap: () {
                                                   if (index >= 0 && index < _tasks.length) {
@@ -1030,7 +1095,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 ),
                                               ),
                                             // Collapse toggle button with safer handling
-                                            if (_tasks[index].subtasks.isNotEmpty)
+                                            if (_tasks[actualIndex].subtasks.isNotEmpty)
                                               GestureDetector(
                                                 onTap: () {
                                                   if (index >= 0 && index < _tasks.length) {
@@ -1069,7 +1134,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 style: TextStyle(
                                                   color: Colors.black87,
                                                   fontSize: 14,
-                                                  fontWeight: _hasIndentedChild(index) ? FontWeight.w600 : FontWeight.normal,
+                                                  fontWeight: _hasIndentedChild(actualIndex) ? FontWeight.w600 : FontWeight.normal,
                                                   decoration: task.isCompleted
                                                       ? TextDecoration.lineThrough
                                                       : null,
