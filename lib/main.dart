@@ -258,26 +258,10 @@ class _MyHomePageState extends State<MyHomePage> {
         _tasks = tasksJson.map((taskJson) => 
           Task.fromJson(jsonDecode(taskJson))
         ).toList();
-        
-        // Sort tasks to ensure completed tasks are at the end
-        _sortTasks();
       });
     }
   }
   
-  // Sort tasks with completed tasks at the end
-  void _sortTasks() {
-    _tasks.sort((a, b) {
-      if (a.isCompleted && !b.isCompleted) {
-        return 1; // a comes after b
-      } else if (!a.isCompleted && b.isCompleted) {
-        return -1; // a comes before b
-      } else {
-        return 0; // maintain relative order
-      }
-    });
-  }
-
   // Calculate the percentage of completed tasks
   double _calculateCompletionPercentage() {
     if (_tasks.isEmpty) return 0.0;
@@ -416,6 +400,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Start editing a task
   void _startEditingTask(int index, {bool shouldUnfocus = true}) {
+    // Add bounds check to prevent range error
     if (index < 0 || index >= _tasks.length) return;
 
     if (_editingIndex != null) {
@@ -462,36 +447,8 @@ class _MyHomePageState extends State<MyHomePage> {
         _taskController.clear();
       }
       
-      // Create a copy of the task to prevent reference issues
-      final Task taskToToggle = _tasks[index];
-      final bool newCompletionState = !taskToToggle.isCompleted;
-      
-      // Create a new task with the same ID but toggled completion status
-      final Task toggledTask = Task(
-        title: taskToToggle.title,
-        isCompleted: newCompletionState,
-        isCollapsed: taskToToggle.isCollapsed,
-        id: taskToToggle.id // Keep the same ID
-      );
-      
-      // Remove the original task
-      _tasks.removeAt(index);
-      
-      // Insert the toggled task in the appropriate position
-      if (newCompletionState) {
-        // If now completed, add to the end
-        _tasks.add(toggledTask);
-      } else {
-        // If now unchecked, find where to insert it among active tasks
-        int firstCompletedIndex = _tasks.indexWhere((task) => task.isCompleted);
-        if (firstCompletedIndex != -1) {
-          _tasks.insert(firstCompletedIndex, toggledTask);
-        } else {
-          // No completed tasks, add to the end
-          _tasks.add(toggledTask);
-        }
-      }
-      _taskIndentLevels.remove(toggledTask.id); // Remove indentation for completed task
+      // Simply toggle the completion status without moving the task
+      _tasks[index].isCompleted = !_tasks[index].isCompleted;
     });
     
     _saveTasks();
@@ -795,7 +752,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     // Progress bar showing task completion percentage
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
-                      child: Column(
+        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Percentage text
@@ -809,7 +766,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                   color: Colors.grey.shade700,
                                 ),
                               ),
-                              Text(
+            Text(
                                 "${(_calculateCompletionPercentage() * 100).toInt()}%",
                                 style: TextStyle(
                                   fontSize: 12,
@@ -875,35 +832,57 @@ class _MyHomePageState extends State<MyHomePage> {
                                 );
                               },
                               onReorder: (int oldIndex, int newIndex) {
-                                setState(() {
-                                  // Save any current editing
-                                  if (_editingIndex != null) {
-                                    _saveCurrentEditing();
-                                  }
-                                
-                                  // Handle index adjustment when moving an item down
-                                  if (oldIndex < newIndex) {
-                                    newIndex -= 1;
-                                  }
-                                  
-                                  // Move the task
-                                  final Task movedTask = _tasks.removeAt(oldIndex);
-                                  _tasks.insert(newIndex, movedTask);
-                                  
-                                  // Update editing index if necessary
-                                  if (_editingIndex != null) {
-                                    if (_editingIndex == oldIndex) {
-                                      _editingIndex = newIndex;
-                                    } else if (oldIndex < _editingIndex! && newIndex >= _editingIndex!) {
-                                      _editingIndex = _editingIndex! - 1;
-                                    } else if (oldIndex > _editingIndex! && newIndex <= _editingIndex!) {
-                                      _editingIndex = _editingIndex! + 1;
-                                    }
-                                  }
-                                });
-                                
-                                _saveTasks();
-                              },
+  if (oldIndex < newIndex) {
+    newIndex -= 1;
+  }
+
+  final String movedTaskId = _tasks[oldIndex].id;
+  final int movedTaskIndent = _taskIndentLevels[movedTaskId] ?? 0;
+
+  // Collect the task and all its children
+  final List<Task> movingGroup = [ _tasks[oldIndex] ];
+  final List<String> movingGroupIds = [ movedTaskId ];
+  final List<int> movingGroupIndents = [ movedTaskIndent ];
+
+  for (int i = oldIndex + 1; i < _tasks.length; i++) {
+    final String childId = _tasks[i].id;
+    final int childIndent = _taskIndentLevels[childId] ?? 0;
+
+    if (childIndent > movedTaskIndent) {
+      movingGroup.add(_tasks[i]);
+      movingGroupIds.add(childId);
+      movingGroupIndents.add(childIndent);
+    } else {
+      break;
+    }
+  }
+
+  // Remove the group
+  _tasks.removeRange(oldIndex, oldIndex + movingGroup.length);
+
+  // Insert the group at newIndex
+  _tasks.insertAll(newIndex, movingGroup);
+
+  // Reapply indent levels
+  for (int i = 0; i < movingGroup.length; i++) {
+    _taskIndentLevels[movingGroupIds[i]] = movingGroupIndents[i];
+  }
+
+  // Update editing index
+  if (_editingIndex != null) {
+    if (_editingIndex! >= oldIndex && _editingIndex! < oldIndex + movingGroup.length) {
+      _editingIndex = newIndex + (_editingIndex! - oldIndex);
+    } else if (_editingIndex! < oldIndex && _editingIndex! >= newIndex) {
+      _editingIndex = _editingIndex! + movingGroup.length;
+    } else if (_editingIndex! > oldIndex && _editingIndex! < newIndex) {
+      _editingIndex = _editingIndex! - movingGroup.length;
+    }
+  }
+
+  _saveTasks();
+  _saveTaskIndentation();
+  setState(() {});
+},
                               itemBuilder: (context, index) {
                                 // Check if index is valid
                                 if (index < 0 || index >= _tasks.length) {
@@ -1029,26 +1008,27 @@ class _MyHomePageState extends State<MyHomePage> {
                                               SizedBox(width: 20.0 * indentLevel),
                                             
                                             // Checkbox
-                                            GestureDetector(
-                                              onTap: () {
-                                                if (index >= 0 && index < _tasks.length) {
-                                                  _toggleTask(index);
-                                                }
-                                              },
-                                              child: Material(
-                                                type: MaterialType.transparency,
-                                                child: Checkbox(
-                                                  value: task.isCompleted,
-                                                  onChanged: null,
-                                                  activeColor: Colors.black,
-                                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                  visualDensity: VisualDensity.compact,
-                                                  hoverColor: Colors.transparent,
-                                                  focusColor: Colors.transparent,
-                                                  splashRadius: 0,
+                                            if (!_hasIndentedChild(index))
+                                              GestureDetector(
+                                                onTap: () {
+                                                  if (index >= 0 && index < _tasks.length) {
+                                                    _toggleTask(index);
+                                                  }
+                                                },
+                                                child: Material(
+                                                  type: MaterialType.transparency,
+                                                  child: Checkbox(
+                                                    value: task.isCompleted,
+                                                    onChanged: null,
+                                                    activeColor: Colors.black,
+                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                    visualDensity: VisualDensity.compact,
+                                                    hoverColor: Colors.transparent,
+                                                    focusColor: Colors.transparent,
+                                                    splashRadius: 0,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
                                             // Collapse toggle button with safer handling
                                             if (_tasks[index].subtasks.isNotEmpty)
                                               GestureDetector(
@@ -1089,6 +1069,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 style: TextStyle(
                                                   color: Colors.black87,
                                                   fontSize: 14,
+                                                  fontWeight: _hasIndentedChild(index) ? FontWeight.w600 : FontWeight.normal,
                                                   decoration: task.isCompleted
                                                       ? TextDecoration.lineThrough
                                                       : null,
@@ -1150,4 +1131,17 @@ class _MyHomePageState extends State<MyHomePage> {
       _saveTasks();
     }
   }
-}
+
+  bool _hasIndentedChild(int parentIndex) {
+    if (parentIndex < 0 || parentIndex >= _tasks.length - 1) return false;
+    final String parentId = _tasks[parentIndex].id;
+    final int parentIndent = _taskIndentLevels[parentId] ?? 0;
+
+    for (int i = parentIndex + 1; i < _tasks.length; i++) {
+      final int currentIndent = _taskIndentLevels[_tasks[i].id] ?? 0;
+      if (currentIndent > parentIndent) return true;
+      if (currentIndent <= parentIndent) break;
+    }
+    return false;
+  }
+} // End of _MyHomePageState class
