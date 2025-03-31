@@ -272,10 +272,16 @@ class _MyHomePageState extends State<MyHomePage> {
   
   // Calculate the percentage of completed tasks
   double _calculateCompletionPercentage() {
-    if (_tasks.isEmpty) return 0.0;
-    
-    int completedTasks = _tasks.where((task) => task.isCompleted).length;
-    return completedTasks / _tasks.length;
+    final realTasks = _tasks.where((task) {
+    return !_isTitleTask(task) &&
+           task.title.trim() != '' &&
+           task.title.trim() != '---';
+    }).toList();
+
+    if (realTasks.isEmpty) return 0.0;
+
+    int completedTasks = realTasks.where((task) => task.isCompleted).length;
+    return completedTasks / realTasks.length;
   }
 
   // Create a new empty task at the specified index and immediately edit it
