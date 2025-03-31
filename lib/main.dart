@@ -101,18 +101,20 @@ class Task {
   String title;
   bool isCompleted;
   bool isCollapsed;
+  bool isTitle;
   String id;
   List<Task> subtasks;
   
   Task({
-    required this.title, 
-    this.isCompleted = false, 
+    required this.title,
+    this.isCompleted = false,
     this.isCollapsed = false,
+    bool? isTitle,
     String? id,
-    List<Task>? subtasks
-  }) : 
-    this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString(),
-    this.subtasks = subtasks ?? [];
+    List<Task>? subtasks,
+  })  : this.isTitle = isTitle ?? false,
+        this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString(),
+        this.subtasks = subtasks ?? [];
   
   // Convert Task to JSON
   Map<String, dynamic> toJson() {
@@ -120,6 +122,7 @@ class Task {
       'title': title,
       'isCompleted': isCompleted,
       'isCollapsed': isCollapsed,
+      'isTitle': isTitle,
       'id': id,
       'subtasks': subtasks.map((subtask) => subtask.toJson()).toList(),
     };
@@ -138,10 +141,11 @@ class Task {
     }
     
     return Task(
-      title: json['title'] as String,
-      isCompleted: json['isCompleted'] as bool,
-      isCollapsed: json['isCollapsed'] as bool? ?? false,
-      id: json['id'] as String,
+      title: (json['title'] as String?) ?? '',
+      isCompleted: (json['isCompleted'] as bool?) ?? false,
+      isCollapsed: (json['isCollapsed'] as bool?) ?? false,
+      isTitle: (json['isTitle'] as bool?) ?? false,
+      id: (json['id'] as String?) ?? DateTime.now().millisecondsSinceEpoch.toString(),
       subtasks: parsedSubtasks,
     );
   }
@@ -177,8 +181,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _showCompletedTasks = true;
 
   bool _isTitleTask(Task task) {
-    final index = _tasks.indexOf(task);
-    return _hasIndentedChild(index);
+    return task.isTitle == true;
   }
 
   @override
@@ -322,7 +325,9 @@ class _MyHomePageState extends State<MyHomePage> {
           title: _taskController.text,
           isCompleted: _tasks[currentIndex].isCompleted,
           isCollapsed: _tasks[currentIndex].isCollapsed,
-          id: _tasks[currentIndex].id
+          isTitle: _tasks[currentIndex].isTitle,
+          id: _tasks[currentIndex].id,
+          subtasks: List<Task>.from(_tasks[currentIndex].subtasks)
         );
         
         // Replace the task at the index
@@ -379,12 +384,14 @@ class _MyHomePageState extends State<MyHomePage> {
         });
       } else {
         setState(() {
-          // Create a copy of the task with updated title but same ID and completion status
+          // Create a copy of the task with updated title but preserve all other properties
           final Task updatedTask = Task(
             title: _taskController.text,
             isCompleted: _tasks[index].isCompleted,
             isCollapsed: _tasks[index].isCollapsed,
-            id: _tasks[index].id
+            isTitle: _tasks[index].isTitle,
+            id: _tasks[index].id,
+            subtasks: List<Task>.from(_tasks[index].subtasks)
           );
           
           // Replace the task at the index
@@ -443,7 +450,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Toggle task completion
   void _toggleTask(int index) {
-    if (_isTitleTask(_tasks[index])) return;
     // Check index bounds
     if (index < 0 || index >= _tasks.length) {
       return;
@@ -697,6 +703,16 @@ class _MyHomePageState extends State<MyHomePage> {
           autofocus: true,
           onKeyEvent: (FocusNode node, KeyEvent event) {
             if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.keyH &&
+                  HardwareKeyboard.instance.isMetaPressed) {
+                if (_editingIndex != null && _editingIndex! < _tasks.length) {
+                  setState(() {
+                    _tasks[_editingIndex!].isTitle = !_tasks[_editingIndex!].isTitle;
+                  });
+                  _saveTasks();
+                  return KeyEventResult.handled;
+                }
+              }
               if (event.logicalKey == LogicalKeyboardKey.keyZ &&
                   HardwareKeyboard.instance.isMetaPressed) {
                 if (HardwareKeyboard.instance.isShiftPressed) {
@@ -916,53 +932,82 @@ class _MyHomePageState extends State<MyHomePage> {
                                 );
                               },
                               onReorder: (int oldIndex, int newIndex) {
-    setState(() {
-      if (_editingIndex != null) {
-        _saveCurrentEditing();
-      }
+    _snapshotTasks(); // Take a snapshot for undo
+    
+    if (_editingIndex != null) {
+      _saveCurrentEditing();
+    }
 
+    setState(() {
+      // Step 1: Map between displayed and actual indices
       final Task movedTask = displayedTasks[oldIndex];
       final int actualOldIndex = _tasks.indexOf(movedTask);
-
-      // Find all child tasks of the moved task
-      final List<Task> groupToMove = [movedTask];
+      
+      // Step 2: Find all tasks in the group (parent + children) by indentation level
       final int parentIndent = _taskIndentLevels[movedTask.id] ?? 0;
-
+      final List<Task> groupToMove = [];
+      int groupSize = 0;
+      
+      // Add parent task
+      groupToMove.add(_tasks[actualOldIndex]);
+      groupSize++;
+      
+      // Find all child tasks by indent level
       for (int i = actualOldIndex + 1; i < _tasks.length; i++) {
-        final Task t = _tasks[i];
-        final int indent = _taskIndentLevels[t.id] ?? 0;
-        if (indent > parentIndent) {
-          groupToMove.add(t);
-        } else {
+        final Task task = _tasks[i];
+        final int indent = _taskIndentLevels[task.id] ?? 0;
+        if (indent <= parentIndent) {
+          // This task is not a child, so we're done finding children
           break;
         }
+        groupToMove.add(task);
+        groupSize++;
       }
-
-      // Remove the entire group from the _tasks list
-      _tasks.removeRange(actualOldIndex, actualOldIndex + groupToMove.length);
-
-      // Recalculate newIndex considering the removal
+      
+      // Step 3: Create a new list without the moved group
+      final List<Task> newTaskList = [];
+      for (int i = 0; i < _tasks.length; i++) {
+        if (i < actualOldIndex || i >= actualOldIndex + groupSize) {
+          newTaskList.add(_tasks[i]);
+        }
+      }
+      
+      // Step 4: Calculate the new insertion index in the modified list
+      int adjustedNewIndex = newIndex;
       if (oldIndex < newIndex) {
-        newIndex -= groupToMove.length;
+        adjustedNewIndex -= groupSize;
       }
-
-      // Determine where to insert in actual _tasks
-      int actualNewIndex = newIndex >= displayedTasks.length
-          ? _tasks.length
-          : _tasks.indexOf(displayedTasks[newIndex]);
-
-      _tasks.insertAll(actualNewIndex, groupToMove);
-
-      // Adjust editing index if needed
+      
+      // Convert to actual index in the new list
+      int actualNewIndex = adjustedNewIndex;
+      if (actualNewIndex > newTaskList.length) {
+        actualNewIndex = newTaskList.length;
+      }
+      
+      // Step 5: Insert the group at the new position
+      newTaskList.insertAll(actualNewIndex, groupToMove);
+      
+      // Step 6: Replace the tasks list with our new ordered list
+      _tasks = newTaskList;
+      
+      // Step 7: Adjust editing index if needed
       if (_editingIndex != null) {
-        final movedIds = groupToMove.map((t) => t.id).toSet();
-        if (movedIds.contains(_tasks[_editingIndex!].id)) {
-          _editingIndex = actualNewIndex + groupToMove.indexWhere((t) => t.id == _tasks[_editingIndex!].id);
+        if (_editingIndex! >= actualOldIndex && _editingIndex! < actualOldIndex + groupSize) {
+          // The editing task was part of the moved group
+          int offsetInGroup = _editingIndex! - actualOldIndex;
+          _editingIndex = actualNewIndex + offsetInGroup;
+        } else if (_editingIndex! >= actualOldIndex + groupSize) {
+          // The editing task was after the group
+          _editingIndex = _editingIndex! - groupSize + (actualNewIndex < _editingIndex! - groupSize + 1 ? groupSize : 0);
+        } else if (_editingIndex! >= actualNewIndex && _editingIndex! < actualOldIndex) {
+          // The editing task was between the new position and old position
+          _editingIndex = _editingIndex! + groupSize;
         }
       }
     });
 
     _saveTasks();
+    _saveTaskIndentation();
   },
                               itemBuilder: (context, index) {
                                 // Check if index is valid
@@ -1153,7 +1198,7 @@ class _MyHomePageState extends State<MyHomePage> {
                                                 style: TextStyle(
                                                   color: Colors.black87,
                                                   fontSize: 14,
-                                                  fontWeight: _hasIndentedChild(actualIndex) ? FontWeight.w600 : FontWeight.normal,
+                                                  fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
                                                   decoration: task.isCompleted
                                                       ? TextDecoration.lineThrough
                                                       : null,
@@ -1185,6 +1230,7 @@ class _MyHomePageState extends State<MyHomePage> {
       title: t.title,
       isCompleted: t.isCompleted,
       isCollapsed: t.isCollapsed,
+      isTitle: t.isTitle ?? false,
       id: t.id,
       subtasks: List<Task>.from(t.subtasks),
     )).toList());
@@ -1196,7 +1242,15 @@ class _MyHomePageState extends State<MyHomePage> {
   
   void _undo() {
     if (_undoStack.isNotEmpty) {
-      _redoStack.add(_tasks);
+      _redoStack.add(_tasks.map((t) => Task(
+        title: t.title,
+        isCompleted: t.isCompleted,
+        isCollapsed: t.isCollapsed,
+        isTitle: t.isTitle ?? false,
+        id: t.id,
+        subtasks: List<Task>.from(t.subtasks),
+      )).toList());
+      
       _tasks = _undoStack.removeLast();
       _editingIndex = null;
       _taskController.clear();
@@ -1207,7 +1261,15 @@ class _MyHomePageState extends State<MyHomePage> {
   
   void _redo() {
     if (_redoStack.isNotEmpty) {
-      _undoStack.add(_tasks);
+      _undoStack.add(_tasks.map((t) => Task(
+        title: t.title,
+        isCompleted: t.isCompleted,
+        isCollapsed: t.isCollapsed,
+        isTitle: t.isTitle ?? false,
+        id: t.id,
+        subtasks: List<Task>.from(t.subtasks),
+      )).toList());
+      
       _tasks = _redoStack.removeLast();
       _editingIndex = null;
       _taskController.clear();
