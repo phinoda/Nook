@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'widgets/sidebar.dart'; // Sidebar widget is implemented in lib/widgets/sidebar.dart
 import 'package:flutter/services.dart';
 import 'dart:ui' as ui;
 import 'dart:async';
@@ -68,6 +69,7 @@ class MyApp extends StatelessWidget {
         textSelectionTheme: TextSelectionThemeData(
           cursorColor: Colors.black,
           selectionHandleColor: Colors.transparent,
+          selectionColor: Color(0xFFF5D478), 
         ),
         // Override all button styles to remove highlight effects
         buttonTheme: ButtonThemeData(
@@ -161,11 +163,14 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  String _dateTime = '';
-  Timer? _timer;
+  
   static const platform = MethodChannel('com.example.nook/window');
   final TextEditingController _taskController = TextEditingController();
   final FocusNode _taskFocusNode = FocusNode();
+  String _listTitle = 'Today'; // Default title for the current list
+  bool _isEditingTitle = false;
+  final TextEditingController _titleController = TextEditingController();
+  final FocusNode _titleFocusNode = FocusNode();
   
   // Task management state
   List<Task> _tasks = [];
@@ -187,9 +192,24 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    _updateDateTime();
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
-      _updateDateTime();
+    
+
+    // Update list title when editing is complete
+    _titleFocusNode.addListener(() {
+      if (!_titleFocusNode.hasFocus && _isEditingTitle) {
+        final trimmed = _titleController.text.trim();
+        if (trimmed.isNotEmpty && trimmed != _listTitle) {
+          setState(() {
+            _listTitle = trimmed;
+            _isEditingTitle = false;
+          });
+          _saveListTitle();
+        } else {
+          setState(() {
+            _isEditingTitle = false;
+          });
+        }
+      }
     });
     
     // Configure focus node to minimize highlight effect
@@ -202,29 +222,21 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     });
     
-    // Load saved tasks
-    _loadTasks();
+    _loadListTitle(); // Load list title from SharedPreferences
+    _titleController.text = _listTitle;
+    _loadTasks(); // Load saved tasks
     _loadTaskIndentation(); // Load task indentation levels
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    
     _taskController.dispose();
     _taskFocusNode.dispose();
     super.dispose();
   }
 
-  void _updateDateTime() {
-    final now = DateTime.now();
-    final dayFormat = DateFormat('EEE'); // Day of week (Sun)
-    final dateFormat = DateFormat('MMM d'); // Month and day (Mar 16)
-    final timeFormat = DateFormat('h:mm a'); // Hour and minute (3:07 a.m.)
-    
-    setState(() {
-      _dateTime = '${dayFormat.format(now)} ${dateFormat.format(now)}  ${timeFormat.format(now)}';
-    });
-  }
+  
   
   // Methods to control window visibility from Flutter if needed
   Future<void> hideWindow() async {
@@ -242,6 +254,22 @@ class _MyHomePageState extends State<MyHomePage> {
       print("Failed to show window: ${e.message}");
     }
   }
+
+  // Save list title to SharedPreferences
+Future<void> _saveListTitle() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('list_title', _listTitle);
+}
+
+Future<void> _loadListTitle() async {
+  final prefs = await SharedPreferences.getInstance();
+  final savedTitle = prefs.getString('list_title');
+  if (savedTitle != null && savedTitle.trim().isNotEmpty) {
+    setState(() {
+      _listTitle = savedTitle.trim();
+    });
+  }
+}
 
   // Save tasks to SharedPreferences
   Future<void> _saveTasks() async {
@@ -766,19 +794,62 @@ class _MyHomePageState extends State<MyHomePage> {
                   mainAxisAlignment: MainAxisAlignment.start,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    // Time display - Left aligned with white background and black text
-                    Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 25),
-                      child: Text(
-                        _dateTime,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                          height: 1.5,
-                          color: Colors.black,
+                    
+
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                      child: SizedBox(
+                        height: 36,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _isEditingTitle
+                              ? TextField(
+                                  controller: _titleController,
+                                  selectionControls: MinimalTextSelectionControls(),
+                                  selectionHeightStyle: BoxHeightStyle.tight,
+                                  selectionWidthStyle: BoxWidthStyle.tight,
+                                  focusNode: _titleFocusNode,
+                                  autofocus: true,
+                                  style: TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                    height: 1.0,
+                                  ),
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    isCollapsed: true,
+                                  ),
+                                  onSubmitted: (value) {
+                                    setState(() {
+                                      _listTitle = value;
+                                      _isEditingTitle = false;
+                                    });
+                                  },
+                                )
+                              : GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _isEditingTitle = true;
+                                      _titleController.text = _listTitle;
+                                    });
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      _titleFocusNode.requestFocus();
+                                    });
+                                  },
+                                  child: Text(
+                                    _listTitle,
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black,
+                                      height: 1.0,
+                                    ),
+                                  ),
+                                ),
                         ),
-                        textAlign: TextAlign.left,
                       ),
                     ),
                     
@@ -837,7 +908,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-            Text(
+                            Text(
                                 "Show completed tasks",
                                 style: TextStyle(
                                   fontSize: 12,
