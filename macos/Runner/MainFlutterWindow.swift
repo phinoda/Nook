@@ -15,7 +15,7 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     
     // Set window width to 350 and height to full screen height
-    let windowWidth: CGFloat = 350
+    let windowWidth: CGFloat = 480
     
     // Get the screen size
     guard let screen = NSScreen.main else {

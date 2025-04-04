@@ -185,6 +185,12 @@ class _MyHomePageState extends State<MyHomePage> {
   // Add this state variable to track whether completed tasks are shown
   bool _showCompletedTasks = true;
 
+  // Add these to your existing state variables in _MyHomePageState
+  Map<String, List<Task>> _listTasks = {'Today': []};
+  String _currentListId = 'Today';
+
+  final GlobalKey<SidebarState> _sidebarKey = GlobalKey<SidebarState>();
+
   bool _isTitleTask(Task task) {
     return task.isTitle == true;
   }
@@ -259,6 +265,12 @@ class _MyHomePageState extends State<MyHomePage> {
 Future<void> _saveListTitle() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString('list_title', _listTitle);
+  
+  // Update to use the public state type
+  final sidebarState = _sidebarKey.currentState;
+  if (sidebarState != null) {
+    sidebarState.updateCurrentListTitle(_currentListId, _listTitle);
+  }
 }
 
 Future<void> _loadListTitle() async {
@@ -275,30 +287,50 @@ Future<void> _loadListTitle() async {
   Future<void> _saveTasks() async {
     final prefs = await SharedPreferences.getInstance();
     
+    // Store in memory map
+    _listTasks[_listTitle] = List.from(_tasks);
+    
     // Convert tasks to JSON
     final List<String> tasksJson = _tasks.map((task) => 
       jsonEncode(task.toJson())
     ).toList();
     
-    // Save JSON string list to SharedPreferences
-    await prefs.setStringList('tasks', tasksJson);
+    // Save JSON string list to SharedPreferences with list-specific key
+    await prefs.setStringList('tasks_$_listTitle', tasksJson);
+    
+    // For backward compatibility
+    if (_listTitle == 'Today') {
+      await prefs.setStringList('tasks', tasksJson);
+    }
   }
 
   // Load tasks from SharedPreferences
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // Get JSON string list from SharedPreferences
-    final List<String>? tasksJson = prefs.getStringList('tasks');
+    // Try to load lists first
+    final listNames = prefs.getStringList('lists') ?? ['Today'];
     
-    if (tasksJson != null) {
-      // Convert JSON to tasks
-      setState(() {
-        _tasks = tasksJson.map((taskJson) => 
+    // For each list, try to load its tasks
+    for (final listName in listNames) {
+      final tasksKey = 'tasks_$listName';
+      final List<String>? tasksJson = prefs.getStringList(tasksKey);
+      
+      if (tasksJson != null) {
+        // Convert JSON to tasks for this list
+        _listTasks[listName] = tasksJson.map((taskJson) => 
           Task.fromJson(jsonDecode(taskJson))
         ).toList();
-      });
+      } else {
+        // Initialize with empty list if no tasks found
+        _listTasks[listName] = [];
+      }
     }
+    
+    // Set the current tasks to the current list's tasks
+    setState(() {
+      _tasks = _listTasks[_currentListId] ?? [];
+    });
   }
   
   // Calculate the percentage of completed tasks
@@ -723,7 +755,7 @@ Future<void> _loadListTitle() async {
         : _tasks.where((task) => !task.isCompleted).toList();
     
     return Container(
-      width: 350,
+      width: 480,  // Adjusted for sidebar and content
       height: WidgetsBinding.instance.window.physicalSize.height / WidgetsBinding.instance.window.devicePixelRatio,
       child: Material(
         type: MaterialType.transparency,
@@ -787,493 +819,224 @@ Future<void> _loadListTitle() async {
           },
           child: Scaffold(
             backgroundColor: Colors.white,
-            body: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(10.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    
-
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                      child: SizedBox(
-                        height: 36,
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: _isEditingTitle
-                              ? TextField(
-                                  controller: _titleController,
-                                  selectionControls: MinimalTextSelectionControls(),
-                                  selectionHeightStyle: BoxHeightStyle.tight,
-                                  selectionWidthStyle: BoxWidthStyle.tight,
-                                  focusNode: _titleFocusNode,
-                                  autofocus: true,
-                                  style: TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black,
-                                    height: 1.0,
-                                  ),
-                                  decoration: InputDecoration(
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    isCollapsed: true,
-                                  ),
-                                  onSubmitted: (value) {
-                                    setState(() {
-                                      _listTitle = value;
-                                      _isEditingTitle = false;
-                                    });
-                                  },
-                                )
-                              : GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      _isEditingTitle = true;
-                                      _titleController.text = _listTitle;
-                                    });
-                                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                                      _titleFocusNode.requestFocus();
-                                    });
-                                  },
-                                  child: Text(
-                                    _listTitle,
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      height: 1.0,
-                                    ),
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ),
-                    
-                    // Progress bar and percentage
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
-        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Percentage text
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                "Progress",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade700,
-                                ),
-                              ),
-                              Text(
-                                "${(_calculateCompletionPercentage() * 100).toInt()}%",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 5),
-                          // Progress bar
-                          Container(
-                            height: 4,
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                            child: FractionallySizedBox(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: _calculateCompletionPercentage(),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                            ),
-                          ),
-                          
-                          // Increased spacing between progress bar and toggle
-                          SizedBox(height: 20),
-                          
-                          // Toggle for completed tasks
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                            Text(
-                                "Show completed tasks",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade700,
-                                ),
-                              ),
-                              // Custom-styled switch
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _showCompletedTasks = !_showCompletedTasks;
-                                    // Reset editing if the task being edited becomes hidden
-                                    if (_editingIndex != null && 
-                                        _editingIndex! < _tasks.length && 
-                                        _tasks[_editingIndex!].isCompleted && 
-                                        !_showCompletedTasks) {
-                                      _saveCurrentEditing();
-                                      _editingIndex = null;
-                                      _taskController.clear();
-                                    }
-                                  });
-                                },
-                                child: AnimatedContainer(
-                                  duration: Duration(milliseconds: 200),
-                                  width: 36,
-                                  height: 20,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: _showCompletedTasks ? Colors.black : Colors.grey.shade400,
-                                      width: 1.5,
-                                    ),
-                                    color: _showCompletedTasks ? Colors.black : Colors.transparent,
-                                  ),
-                                  child: Stack(
-                                    children: [
-                                      AnimatedPositioned(
-                                        duration: Duration(milliseconds: 200),
-                                        curve: Curves.easeInOut,
-                                        left: _showCompletedTasks ? 18 : 2,
-                                        top: 1.5,
-                                        child: Container(
-                                          width: 14,
-                                          height: 14,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: _showCompletedTasks ? Colors.white : Colors.grey.shade400,
+            body: Row(
+              children: [
+                Sidebar(
+                  key: _sidebarKey,
+                  currentListTitle: _listTitle,
+                  onListSelected: (listName) {
+                    _saveCurrentTasks();
+                    _loadTasksForList(listName);
+                  },
+                  onListRenamed: (oldName, newName) {
+                    // This handles when a list is renamed in the sidebar
+                    if (oldName == _listTitle) {
+                      setState(() {
+                        _listTitle = newName;
+                        _currentListId = newName;
+                      });
+                      _saveListTitle();
+                      
+                      // Transfer tasks from old name to new name
+                      if (_listTasks.containsKey(oldName)) {
+                        _listTasks[newName] = _listTasks[oldName]!;
+                        _listTasks.remove(oldName);
+                      }
+                    }
+                  },
+                ),
+                Expanded(
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(10.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                            child: SizedBox(
+                              height: 36,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: _isEditingTitle
+                                    ? TextField(
+                                        controller: _titleController,
+                                        selectionControls: MinimalTextSelectionControls(),
+                                        selectionHeightStyle: BoxHeightStyle.tight,
+                                        selectionWidthStyle: BoxWidthStyle.tight,
+                                        focusNode: _titleFocusNode,
+                                        autofocus: true,
+                                        style: TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black,
+                                          height: 1.0,
+                                        ),
+                                        decoration: InputDecoration(
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          isCollapsed: true,
+                                        ),
+                                        onSubmitted: (value) {
+                                          final oldTitle = _listTitle;
+                                          setState(() {
+                                            _listTitle = value;
+                                            _isEditingTitle = false;
+                                            _currentListId = value;
+                                          });
+                                          _saveListTitle();
+                                          
+                                          // If tasks exist under the old title, transfer them to the new title
+                                          if (_listTasks.containsKey(oldTitle)) {
+                                            _listTasks[value] = _listTasks[oldTitle]!;
+                                            _listTasks.remove(oldTitle);
+                                          }
+                                          
+                                          // Update the sidebar
+                                          final sidebarState = _sidebarKey.currentState;
+                                          if (sidebarState != null) {
+                                            sidebarState.updateCurrentListTitle(oldTitle, value);
+                                          }
+                                        },
+                                      )
+                                    : GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            _isEditingTitle = true;
+                                            _titleController.text = _listTitle;
+                                          });
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            _titleFocusNode.requestFocus();
+                                          });
+                                        },
+                                        onSecondaryTap: () {
+                                          setState(() {
+                                            _isEditingTitle = true;
+                                            _titleController.text = _listTitle;
+                                          });
+                                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                                            _titleFocusNode.requestFocus();
+                                          });
+                                        },
+                                        child: Text(
+                                          _listTitle,
+                                          style: TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black,
+                                            height: 1.0,
                                           ),
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                ),
                               ),
-                            ],
+                            ),
                           ),
-                        ],
-                      ),
-                    ),
-                    
-                    SizedBox(height: 15),
-                    
-                    // Todo List Section - Use displayedTasks instead of _tasks
-                    Expanded(
-                      child: displayedTasks.isEmpty
-                          ? GestureDetector(
-                              onTap: _createFirstTask,
-                              behavior: HitTestBehavior.opaque,
-                              child: Center(
-                                child: Text(
-                                  _tasks.isEmpty 
-                                      ? "Create your first task" 
-                                      : "No tasks to display",
-                                  style: TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 16,
+                          
+                          // Progress bar and percentage
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 5),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Percentage text
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      "Progress",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                    ),
+                                    Text(
+                                      "${(_calculateCompletionPercentage() * 100).toInt()}%",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade700,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 5),
+                                // Progress bar
+                                Container(
+                                  height: 4,
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade200,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                  child: FractionallySizedBox(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor: _calculateCompletionPercentage(),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black,
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            )
-                          : ReorderableListView.builder(
-                              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-                              itemCount: displayedTasks.length,
-                              buildDefaultDragHandles: false,
-                              proxyDecorator: (child, index, animation) {
-                                return Material(
-                                  elevation: 2,
-                                  color: Colors.white,
-                                  shadowColor: Colors.black26,
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: child,
-                                );
-                              },
-                              onReorder: (int oldIndex, int newIndex) {
-    _snapshotTasks(); // Take a snapshot for undo
-    
-    if (_editingIndex != null) {
-      _saveCurrentEditing();
-    }
-
-    setState(() {
-      // Step 1: Map between displayed and actual indices
-      final Task movedTask = displayedTasks[oldIndex];
-      final int actualOldIndex = _tasks.indexOf(movedTask);
-      
-      // Step 2: Find all tasks in the group (parent + children) by indentation level
-      final int parentIndent = _taskIndentLevels[movedTask.id] ?? 0;
-      final List<Task> groupToMove = [];
-      int groupSize = 0;
-      
-      // Add parent task
-      groupToMove.add(_tasks[actualOldIndex]);
-      groupSize++;
-      
-      // Find all child tasks by indent level
-      for (int i = actualOldIndex + 1; i < _tasks.length; i++) {
-        final Task task = _tasks[i];
-        final int indent = _taskIndentLevels[task.id] ?? 0;
-        if (indent <= parentIndent) {
-          // This task is not a child, so we're done finding children
-          break;
-        }
-        groupToMove.add(task);
-        groupSize++;
-      }
-      
-      // Step 3: Create a new list without the moved group
-      final List<Task> newTaskList = [];
-      for (int i = 0; i < _tasks.length; i++) {
-        if (i < actualOldIndex || i >= actualOldIndex + groupSize) {
-          newTaskList.add(_tasks[i]);
-        }
-      }
-      
-      // Step 4: Calculate the new insertion index in the modified list
-      int adjustedNewIndex = newIndex;
-      if (oldIndex < newIndex) {
-        adjustedNewIndex -= groupSize;
-      }
-      
-      // Convert to actual index in the new list
-      int actualNewIndex = adjustedNewIndex;
-      if (actualNewIndex > newTaskList.length) {
-        actualNewIndex = newTaskList.length;
-      }
-      
-      // Step 5: Insert the group at the new position
-      newTaskList.insertAll(actualNewIndex, groupToMove);
-      
-      // Step 6: Replace the tasks list with our new ordered list
-      _tasks = newTaskList;
-      
-      // Step 7: Adjust editing index if needed
-      if (_editingIndex != null) {
-        if (_editingIndex! >= actualOldIndex && _editingIndex! < actualOldIndex + groupSize) {
-          // The editing task was part of the moved group
-          int offsetInGroup = _editingIndex! - actualOldIndex;
-          _editingIndex = actualNewIndex + offsetInGroup;
-        } else if (_editingIndex! >= actualOldIndex + groupSize) {
-          // The editing task was after the group
-          _editingIndex = _editingIndex! - groupSize + (actualNewIndex < _editingIndex! - groupSize + 1 ? groupSize : 0);
-        } else if (_editingIndex! >= actualNewIndex && _editingIndex! < actualOldIndex) {
-          // The editing task was between the new position and old position
-          _editingIndex = _editingIndex! + groupSize;
-        }
-      }
-    });
-
-    _saveTasks();
-    _saveTaskIndentation();
-  },
-                              itemBuilder: (context, index) {
-                                // Check if index is valid
-                                if (index < 0 || index >= displayedTasks.length) {
-                                  return SizedBox.shrink(key: Key('invalid_index_$index'));
-                                }
                                 
-                                final task = displayedTasks[index];
-                                final actualIndex = _tasks.indexOf(task);
+                                // Increased spacing between progress bar and toggle
+                                SizedBox(height: 20),
                                 
-                                // Editing existing task
-                                if (_editingIndex == actualIndex) {
-                                  final int indentLevel = _taskIndentLevels[task.id] ?? 0;
-                                  
-                                  return Padding(
-                                    key: Key('editing_task_${task.id}'),
-                                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                    child: Row(
-                                      key: ValueKey('editing_row_${task.id}'),
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        // Add indentation based on level
-                                        if (indentLevel > 0) 
-                                          SizedBox(width: 20.0 * indentLevel),
-                                        
-                                        // Checkbox (only show if not a title)
-                                        if (!_isTitleTask(task))
-                                          GestureDetector(
-                                            onTap: () {
-                                              if (index >= 0 && index < _tasks.length) {
-                                                _toggleTask(index);
-                                              }
-                                            },
-                                            child: Material(
-                                              type: MaterialType.transparency,
-                                              child: Checkbox(
-                                                value: task.isCompleted,
-                                                onChanged: (value) {
-                                                  if (index >= 0 && index < _tasks.length) {
-                                                    _toggleTask(index);
-                                                  }
-                                                },
-                                                activeColor: Colors.black,
-                                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                visualDensity: VisualDensity.compact,
-                                                hoverColor: Colors.transparent,
-                                                focusColor: Colors.transparent,
-                                                splashRadius: 0,
-                                              ),
-                                            ),
-                                          ),
-                                        SizedBox(width: 4),
-                                        
-                                        // Indicate if task has subtasks
-                                        if (task.subtasks.isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(right: 4.0),
-                                            child: Icon(
-                                              Icons.subdirectory_arrow_right,
-                                              size: 14,
-                                              color: Colors.grey.shade400,
-                                            ),
-                                          ),
-                                        
-                                        // Text field for editing
-                                        Expanded(
-                                          child: TextField(
-                                            key: ValueKey(task.id),
-                                            controller: _taskController,
-                                            focusNode: _taskFocusNode,
-                                            decoration: InputDecoration(
-                                              border: InputBorder.none,
-                                              hintText: 'Task name...',
-                                              hintStyle: TextStyle(color: Colors.grey.shade400),
-                                              isDense: true,
-                                              contentPadding: EdgeInsets.zero,
-                                              focusedBorder: InputBorder.none,
-                                              enabledBorder: InputBorder.none,
-                                            ),
-                                            style: TextStyle(
-                                              color: Colors.black87,
-                                              fontSize: 14,
-                                              fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
-                                            ),
-                                            cursorColor: Colors.black,
-                                            cursorWidth: 1.5,
-                                            showCursor: true,
-                                            autofocus: true,
-                                            keyboardType: TextInputType.text,
-                                            textInputAction: TextInputAction.next,
-                                            onSubmitted: (value) {
-                                              if (_editingIndex != null) {
-                                                _createNewTaskAfter(_editingIndex!);
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
+                                // Toggle for completed tasks
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                  Text(
+                                      "Show completed tasks",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade700,
+                                      ),
                                     ),
-                                  );
-                                }
-                                
-                                // Regular task display
-                                final int indentLevel = _taskIndentLevels[task.id] ?? 0;
-                                
-                                return Padding(
-                                  key: Key('task_${task.id}'),
-                                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                  child: MouseRegion(
-                                    onEnter: (_) => setState(() => _hoveredIndex = index),
-                                    onExit: (_) => setState(() => _hoveredIndex = null),
-                                    cursor: SystemMouseCursors.click,
-                                    child: ReorderableDragStartListener(
-                                      index: index,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.translucent,
-                                        onTap: () {
-                                          if (index >= 0 && index < _tasks.length) {
-                                            _startEditingTask(index);
+                                    // Custom-styled switch
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _showCompletedTasks = !_showCompletedTasks;
+                                          // Reset editing if the task being edited becomes hidden
+                                          if (_editingIndex != null && 
+                                              _editingIndex! < _tasks.length && 
+                                              _tasks[_editingIndex!].isCompleted && 
+                                              !_showCompletedTasks) {
+                                            _saveCurrentEditing();
+                                            _editingIndex = null;
+                                            _taskController.clear();
                                           }
-                                        },
-                                        child: Row(
-                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                        });
+                                      },
+                                      child: AnimatedContainer(
+                                        duration: Duration(milliseconds: 200),
+                                        width: 36,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: _showCompletedTasks ? Colors.black : Colors.grey.shade400,
+                                            width: 1.5,
+                                          ),
+                                          color: _showCompletedTasks ? Colors.black : Colors.transparent,
+                                        ),
+                                        child: Stack(
                                           children: [
-                                            // Add indentation based on level
-                                            if (indentLevel > 0) 
-                                              SizedBox(width: 20.0 * indentLevel),
-                                            
-                                            // Checkbox
-                                            if (!_isTitleTask(task))
-                                              GestureDetector(
-                                                onTap: () {
-                                                  if (index >= 0 && index < _tasks.length) {
-                                                    _toggleTask(index);
-                                                  }
-                                                },
-                                                child: Material(
-                                                  type: MaterialType.transparency,
-                                                  child: Checkbox(
-                                                    value: task.isCompleted,
-                                                    onChanged: null,
-                                                    activeColor: Colors.black,
-                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                    visualDensity: VisualDensity.compact,
-                                                    hoverColor: Colors.transparent,
-                                                    focusColor: Colors.transparent,
-                                                    splashRadius: 0,
-                                                  ),
-                                                ),
-                                              ),
-                                            // Collapse toggle button with safer handling
-                                            if (_tasks[actualIndex].subtasks.isNotEmpty)
-                                              GestureDetector(
-                                                onTap: () {
-                                                  if (index >= 0 && index < _tasks.length) {
-                                                    setState(() {
-                                                      _tasks[index].isCollapsed = !_tasks[index].isCollapsed;
-                                                      _saveTasks(); // Save the collapsed state
-                                                    });
-                                                  }
-                                                },
-                                                child: Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                                  child: Icon(
-                                                    _tasks[index].isCollapsed ? Icons.expand_more : Icons.expand_less,
-                                                    size: 18,
-                                                    color: Colors.grey.shade400,
-                                                  ),
-                                                ),
-                                              ),
-                                            SizedBox(width: 4),
-                                            
-                                            // Indicate if task has subtasks
-                                            if (task.subtasks.isNotEmpty)
-                                              Padding(
-                                                padding: const EdgeInsets.only(right: 4.0),
-                                                child: Icon(
-                                                  Icons.subdirectory_arrow_right,
-                                                  size: 14,
-                                                  color: Colors.grey.shade400,
-                                                ),
-                                              ),
-                                            
-                                            // Task text
-                                            Expanded(
-                                              child: Text(
-                                                task.title,
-                                                style: TextStyle(
-                                                  color: Colors.black87,
-                                                  fontSize: 14,
-                                                  fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
-                                                  decoration: task.isCompleted
-                                                      ? TextDecoration.lineThrough
-                                                      : null,
-                                                  decorationColor: Colors.black54,
+                                            AnimatedPositioned(
+                                              duration: Duration(milliseconds: 200),
+                                              curve: Curves.easeInOut,
+                                              left: _showCompletedTasks ? 18 : 2,
+                                              top: 1.5,
+                                              child: Container(
+                                                width: 14,
+                                                height: 14,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: _showCompletedTasks ? Colors.white : Colors.grey.shade400,
                                                 ),
                                               ),
                                             ),
@@ -1281,14 +1044,335 @@ Future<void> _loadListTitle() async {
                                         ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  ],
+                                ),
+                              ],
                             ),
+                          ),
+                          
+                          SizedBox(height: 15),
+                          
+                          // Todo List Section - Use displayedTasks instead of _tasks
+                          Expanded(
+                            child: displayedTasks.isEmpty
+                                ? GestureDetector(
+                                    onTap: _createFirstTask,
+                                    behavior: HitTestBehavior.opaque,
+                                    child: Center(
+                                      child: Text(
+                                        _tasks.isEmpty 
+                                            ? "Create your first task" 
+                                            : "No tasks to display",
+                                        style: TextStyle(
+                                          color: Colors.grey,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : ReorderableListView.builder(
+                                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+                                    itemCount: displayedTasks.length,
+                                    buildDefaultDragHandles: false,
+                                    proxyDecorator: (child, index, animation) {
+                                      return Material(
+                                        elevation: 2,
+                                        color: Colors.white,
+                                        shadowColor: Colors.black26,
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: child,
+                                      );
+                                    },
+                                    onReorder: (int oldIndex, int newIndex) {
+          _snapshotTasks(); // Take a snapshot for undo
+          
+          if (_editingIndex != null) {
+            _saveCurrentEditing();
+          }
+
+          setState(() {
+            // Step 1: Map between displayed and actual indices
+            final Task movedTask = displayedTasks[oldIndex];
+            final int actualOldIndex = _tasks.indexOf(movedTask);
+            
+            // Step 2: Find all tasks in the group (parent + children) by indentation level
+            final int parentIndent = _taskIndentLevels[movedTask.id] ?? 0;
+            final List<Task> groupToMove = [];
+            int groupSize = 0;
+            
+            // Add parent task
+            groupToMove.add(_tasks[actualOldIndex]);
+            groupSize++;
+            
+            // Find all child tasks by indent level
+            for (int i = actualOldIndex + 1; i < _tasks.length; i++) {
+              final Task task = _tasks[i];
+              final int indent = _taskIndentLevels[task.id] ?? 0;
+              if (indent <= parentIndent) {
+                // This task is not a child, so we're done finding children
+                break;
+              }
+              groupToMove.add(task);
+              groupSize++;
+            }
+            
+            // Step 3: Create a new list without the moved group
+            final List<Task> newTaskList = [];
+            for (int i = 0; i < _tasks.length; i++) {
+              if (i < actualOldIndex || i >= actualOldIndex + groupSize) {
+                newTaskList.add(_tasks[i]);
+              }
+            }
+            
+            // Step 4: Calculate the new insertion index in the modified list
+            int adjustedNewIndex = newIndex;
+            if (oldIndex < newIndex) {
+              adjustedNewIndex -= groupSize;
+            }
+            
+            // Convert to actual index in the new list
+            int actualNewIndex = adjustedNewIndex;
+            if (actualNewIndex > newTaskList.length) {
+              actualNewIndex = newTaskList.length;
+            }
+            
+            // Step 5: Insert the group at the new position
+            newTaskList.insertAll(actualNewIndex, groupToMove);
+            
+            // Step 6: Replace the tasks list with our new ordered list
+            _tasks = newTaskList;
+            
+            // Step 7: Adjust editing index if needed
+            if (_editingIndex != null) {
+              if (_editingIndex! >= actualOldIndex && _editingIndex! < actualOldIndex + groupSize) {
+                // The editing task was part of the moved group
+                int offsetInGroup = _editingIndex! - actualOldIndex;
+                _editingIndex = actualNewIndex + offsetInGroup;
+              } else if (_editingIndex! >= actualOldIndex + groupSize) {
+                // The editing task was after the group
+                _editingIndex = _editingIndex! - groupSize + (actualNewIndex < _editingIndex! - groupSize + 1 ? groupSize : 0);
+              } else if (_editingIndex! >= actualNewIndex && _editingIndex! < actualOldIndex) {
+                // The editing task was between the new position and old position
+                _editingIndex = _editingIndex! + groupSize;
+              }
+            }
+          });
+
+          _saveTasks();
+          _saveTaskIndentation();
+        },
+                                    itemBuilder: (context, index) {
+                                      // Check if index is valid
+                                      if (index < 0 || index >= displayedTasks.length) {
+                                        return SizedBox.shrink(key: Key('invalid_index_$index'));
+                                      }
+                                      
+                                      final task = displayedTasks[index];
+                                      final actualIndex = _tasks.indexOf(task);
+                                      
+                                      // Editing existing task
+                                      if (_editingIndex == actualIndex) {
+                                        final int indentLevel = _taskIndentLevels[task.id] ?? 0;
+                                        
+                                        return Padding(
+                                          key: Key('editing_task_${task.id}'),
+                                          padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                          child: Row(
+                                            key: ValueKey('editing_row_${task.id}'),
+                                            crossAxisAlignment: CrossAxisAlignment.center,
+                                            children: [
+                                              // Add indentation based on level
+                                              if (indentLevel > 0) 
+                                                SizedBox(width: 20.0 * indentLevel),
+                                              
+                                              // Checkbox (only show if not a title)
+                                              if (!_isTitleTask(task))
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    if (index >= 0 && index < _tasks.length) {
+                                                      _toggleTask(index);
+                                                    }
+                                                  },
+                                                  child: Material(
+                                                    type: MaterialType.transparency,
+                                                    child: Checkbox(
+                                                      value: task.isCompleted,
+                                                      onChanged: (value) {
+                                                        if (index >= 0 && index < _tasks.length) {
+                                                          _toggleTask(index);
+                                                        }
+                                                      },
+                                                      activeColor: Colors.black,
+                                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                      visualDensity: VisualDensity.compact,
+                                                      hoverColor: Colors.transparent,
+                                                      focusColor: Colors.transparent,
+                                                      splashRadius: 0,
+                                                    ),
+                                                  ),
+                                                ),
+                                              SizedBox(width: 4),
+                                              
+                                              // Indicate if task has subtasks
+                                              if (task.subtasks.isNotEmpty)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(right: 4.0),
+                                                  child: Icon(
+                                                    Icons.subdirectory_arrow_right,
+                                                    size: 14,
+                                                    color: Colors.grey.shade400,
+                                                  ),
+                                                ),
+                                              
+                                              // Text field for editing
+                                              Expanded(
+                                                child: TextField(
+                                                  key: ValueKey(task.id),
+                                                  controller: _taskController,
+                                                  focusNode: _taskFocusNode,
+                                                  decoration: InputDecoration(
+                                                    border: InputBorder.none,
+                                                    hintText: 'Task name...',
+                                                    hintStyle: TextStyle(color: Colors.grey.shade400),
+                                                    isDense: true,
+                                                    contentPadding: EdgeInsets.zero,
+                                                    focusedBorder: InputBorder.none,
+                                                    enabledBorder: InputBorder.none,
+                                                  ),
+                                                  style: TextStyle(
+                                                    color: Colors.black87,
+                                                    fontSize: 14,
+                                                    fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
+                                                  ),
+                                                  cursorColor: Colors.black,
+                                                  cursorWidth: 1.5,
+                                                  showCursor: true,
+                                                  autofocus: true,
+                                                  keyboardType: TextInputType.text,
+                                                  textInputAction: TextInputAction.next,
+                                                  onSubmitted: (value) {
+                                                    if (_editingIndex != null) {
+                                                      _createNewTaskAfter(_editingIndex!);
+                                                    }
+                                                  },
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                      
+                                      // Regular task display
+                                      final int indentLevel = _taskIndentLevels[task.id] ?? 0;
+                                      
+                                      return Padding(
+                                        key: Key('task_${task.id}'),
+                                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                        child: MouseRegion(
+                                          onEnter: (_) => setState(() => _hoveredIndex = index),
+                                          onExit: (_) => setState(() => _hoveredIndex = null),
+                                          cursor: SystemMouseCursors.click,
+                                          child: ReorderableDragStartListener(
+                                            index: index,
+                                            child: GestureDetector(
+                                              behavior: HitTestBehavior.translucent,
+                                              onTap: () {
+                                                if (index >= 0 && index < _tasks.length) {
+                                                  _startEditingTask(index);
+                                                }
+                                              },
+                                              child: Row(
+                                                crossAxisAlignment: CrossAxisAlignment.center,
+                                                children: [
+                                                  // Add indentation based on level
+                                                  if (indentLevel > 0) 
+                                                    SizedBox(width: 20.0 * indentLevel),
+                                                  
+                                                  // Checkbox
+                                                  if (!_isTitleTask(task))
+                                                    GestureDetector(
+                                                      onTap: () {
+                                                        if (index >= 0 && index < _tasks.length) {
+                                                          _toggleTask(index);
+                                                        }
+                                                      },
+                                                      child: Material(
+                                                        type: MaterialType.transparency,
+                                                        child: Checkbox(
+                                                          value: task.isCompleted,
+                                                          onChanged: null,
+                                                          activeColor: Colors.black,
+                                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                          visualDensity: VisualDensity.compact,
+                                                          hoverColor: Colors.transparent,
+                                                          focusColor: Colors.transparent,
+                                                          splashRadius: 0,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  // Collapse toggle button with safer handling
+                                                  if (_tasks[actualIndex].subtasks.isNotEmpty)
+                                                    GestureDetector(
+                                                      onTap: () {
+                                                        if (index >= 0 && index < _tasks.length) {
+                                                          setState(() {
+                                                            _tasks[index].isCollapsed = !_tasks[index].isCollapsed;
+                                                            _saveTasks(); // Save the collapsed state
+                                                          });
+                                                        }
+                                                      },
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                                        child: Icon(
+                                                          _tasks[index].isCollapsed ? Icons.expand_more : Icons.expand_less,
+                                                          size: 18,
+                                                          color: Colors.grey.shade400,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  SizedBox(width: 4),
+                                                  
+                                                  // Indicate if task has subtasks
+                                                  if (task.subtasks.isNotEmpty)
+                                                    Padding(
+                                                      padding: const EdgeInsets.only(right: 4.0),
+                                                      child: Icon(
+                                                        Icons.subdirectory_arrow_right,
+                                                        size: 14,
+                                                        color: Colors.grey.shade400,
+                                                      ),
+                                                    ),
+                                                  
+                                                  // Task text
+                                                  Expanded(
+                                                    child: Text(
+                                                      task.title,
+                                                      style: TextStyle(
+                                                        color: Colors.black87,
+                                                        fontSize: 14,
+                                                        fontWeight: _isTitleTask(task) ? FontWeight.w600 : FontWeight.normal,
+                                                        decoration: task.isCompleted
+                                                            ? TextDecoration.lineThrough
+                                                            : null,
+                                                        decorationColor: Colors.black54,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
@@ -1361,4 +1445,63 @@ Future<void> _loadListTitle() async {
     }
     return false;
   }
+
+  // Implement this method to handle list selection
+  void _selectList(String listTitle) {
+    // Save the current tasks to the current list
+    _saveTasks();
+    
+    setState(() {
+      // Save the current list's tasks to the map
+      _listTasks[_currentListId] = List.from(_tasks);
+      
+      // Update the current list ID
+      _currentListId = listTitle;
+      
+      // Update the list title
+      _listTitle = listTitle;
+      
+      // Load tasks for the selected list
+      if (_listTasks.containsKey(listTitle)) {
+        _tasks = List.from(_listTasks[listTitle]!);
+      } else {
+        // If this is a new list, initialize with empty tasks
+        _tasks = [];
+      }
+    });
+    
+    // Save the list title change
+    _saveListTitle();
+  }
+
+  void _saveCurrentTasks() {
+    // Store current tasks in the map
+    _listTasks[_listTitle] = List.from(_tasks);
+    _saveTasks();
+  }
+
+Future<void> _loadTasksForList(String listName) async {
+  final prefs = await SharedPreferences.getInstance();
+  final tasksKey = 'tasks_$listName';
+  final List<String>? tasksJson = prefs.getStringList(tasksKey);
+
+  List<Task> loadedTasks = [];
+
+  if (tasksJson != null) {
+    loadedTasks = tasksJson.map((taskJson) =>
+        Task.fromJson(jsonDecode(taskJson))).toList();
+  } else if (listName == 'Today') {
+    final legacyTasksJson = prefs.getStringList('tasks');
+    if (legacyTasksJson != null) {
+      loadedTasks = legacyTasksJson.map((taskJson) =>
+          Task.fromJson(jsonDecode(taskJson))).toList();
+    }
+  }
+
+  setState(() {
+    _tasks = loadedTasks;
+    _listTitle = listName;
+    _currentListId = listName;
+  });
+}
 } // End of _MyHomePageState class
