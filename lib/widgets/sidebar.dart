@@ -54,7 +54,7 @@ class SidebarState extends State<Sidebar> {
     });
     _saveLists();
     
-    // Select the new list
+    // Select the new list - this will trigger onListSelected with an empty list
     widget.onListSelected(newListName);
   }
 
@@ -68,7 +68,13 @@ class SidebarState extends State<Sidebar> {
     }
   }
 
-  void _deleteList(int index) {
+  void _deleteList(int index) async {
+    final listToDelete = _lists[index];
+    
+    // Delete the list's tasks from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('tasks_$listToDelete');
+    
     setState(() {
       _lists.removeAt(index);
     });
@@ -78,113 +84,116 @@ class SidebarState extends State<Sidebar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 120,  // Reduced width to help with overflow
+      width: 200,
       color: Colors.grey.shade50,
-      child: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              itemCount: _lists.length,
-              itemBuilder: (context, index) {
-                final isCurrentList = _lists[index] == widget.currentListTitle;
-                return GestureDetector(
-                  onSecondaryTapDown: (details) {
-                    showMenu(
-                      context: context,
-                      position: RelativeRect.fromLTRB(
-                        details.globalPosition.dx,
-                        details.globalPosition.dy,
-                        details.globalPosition.dx,
-                        details.globalPosition.dy,
-                      ),
-                      items: [
-                        PopupMenuItem(
-                          value: 'rename',
-                          child: Text('Rename', style: TextStyle(fontSize: 12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                itemCount: _lists.length,
+                itemBuilder: (context, index) {
+                  final isCurrentList = _lists[index] == widget.currentListTitle;
+                  return GestureDetector(
+                    onSecondaryTapDown: (details) {
+                      showMenu(
+                        context: context,
+                        position: RelativeRect.fromLTRB(
+                          details.globalPosition.dx,
+                          details.globalPosition.dy,
+                          details.globalPosition.dx,
+                          details.globalPosition.dy,
                         ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete', style: TextStyle(fontSize: 12)),
-                        ),
-                      ],
-                      color: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ).then((value) {
-                      if (value == 'rename') {
-                        setState(() {
-                          _editingIndex = index;
-                          _editListController.text = _lists[index];
-                        });
-                      } else if (value == 'delete') {
-                        _deleteList(index);
-                      }
-                    });
-                  },
-                  child: ListTile(
-                    dense: true,
-                    title: _editingIndex == index
-                      ? TextField(
-                          controller: _editListController,
-                          autofocus: true,
-                          onSubmitted: (newName) {
-                            final oldName = _lists[index];
-                            setState(() {
-                              _lists[index] = newName;
-                              _editingIndex = null;
-                            });
-                            _saveLists();
-                            
-                            // Notify the parent about the rename
-                            if (widget.onListRenamed != null) {
-                              widget.onListRenamed!(oldName, newName);
-                            }
-                            
-                            // If this was the current list, update selection
-                            if (widget.currentListTitle == oldName) {
-                              widget.onListSelected(newName);
-                            }
-                          },
-                        )
-                      : Text(
-                          _lists[index],
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: isCurrentList ? FontWeight.bold : FontWeight.normal,
-                            color: isCurrentList ? Colors.black : Colors.grey.shade800,
+                        items: [
+                          PopupMenuItem(
+                            value: 'rename',
+                            child: Text('Rename', style: TextStyle(fontSize: 12)),
                           ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    selected: isCurrentList,
-                    selectedTileColor: Colors.grey.shade200,
-                    onTap: () {
-                      widget.onListSelected(_lists[index]);
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ).then((value) {
+                        if (value == 'rename') {
+                          setState(() {
+                            _editingIndex = index;
+                            _editListController.text = _lists[index];
+                          });
+                        } else if (value == 'delete') {
+                          _deleteList(index);
+                        }
+                      });
                     },
-                  ),
-                );
-              },
-            ),
-          ),
-          Divider(height: 1),
-          GestureDetector(
-            onTap: _addNewList,
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Row(
-                children: [
-                  Icon(Icons.add, size: 16, color: Colors.grey.shade700),
-                  SizedBox(width: 8),
-                  Text(
-                    'New List',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade700,
+                    child: ListTile(
+                      dense: true,
+                      title: _editingIndex == index
+                        ? TextField(
+                            controller: _editListController,
+                            autofocus: true,
+                            onSubmitted: (newName) {
+                              final oldName = _lists[index];
+                              setState(() {
+                                _lists[index] = newName;
+                                _editingIndex = null;
+                              });
+                              _saveLists();
+                              
+                              // Notify the parent about the rename
+                              if (widget.onListRenamed != null) {
+                                widget.onListRenamed!(oldName, newName);
+                              }
+                              
+                              // If this was the current list, update selection
+                              if (widget.currentListTitle == oldName) {
+                                widget.onListSelected(newName);
+                              }
+                            },
+                          )
+                        : Text(
+                            _lists[index],
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isCurrentList ? FontWeight.bold : FontWeight.normal,
+                              color: isCurrentList ? Colors.black : Colors.grey.shade800,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      selected: isCurrentList,
+                      selectedTileColor: Colors.grey.shade200,
+                      onTap: () {
+                        widget.onListSelected(_lists[index]);
+                      },
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          ),
-        ],
+            Divider(height: 1),
+            GestureDetector(
+              onTap: _addNewList,
+              child: Padding(
+                padding: const EdgeInsets.all(18.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.add, size: 16, color: Colors.grey.shade700),
+                    SizedBox(width: 8),
+                    Text(
+                      'New List',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -15,7 +15,7 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     
     // Set window width to 350 and height to full screen height
-    let windowWidth: CGFloat = 480
+    let windowWidth: CGFloat = 600
     
     // Get the screen size
     guard let screen = NSScreen.main else {
@@ -45,7 +45,7 @@ class MainFlutterWindow: NSWindow {
     
     // Create off-screen frame (hidden position, completely off-screen)
     offScreenFrame = NSRect(
-      x: screenFrame.maxX + windowWidth + 500, // Move it way off-screen with extra margin
+      x: screenFrame.maxX + windowWidth + 600, // Move it way off-screen with extra margin
       y: screenFrame.minY,
       width: windowWidth,
       height: windowHeight

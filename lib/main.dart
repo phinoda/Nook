@@ -276,9 +276,16 @@ Future<void> _saveListTitle() async {
 Future<void> _loadListTitle() async {
   final prefs = await SharedPreferences.getInstance();
   final savedTitle = prefs.getString('list_title');
-  if (savedTitle != null && savedTitle.trim().isNotEmpty) {
+
+  if (savedTitle != null && savedTitle.trim().isNotEmpty && _listTasks.containsKey(savedTitle)) {
     setState(() {
       _listTitle = savedTitle.trim();
+      _currentListId = savedTitle.trim();
+    });
+  } else {
+    // Fallback to current list ID
+    setState(() {
+      _listTitle = _currentListId;
     });
   }
 }
@@ -288,7 +295,7 @@ Future<void> _loadListTitle() async {
     final prefs = await SharedPreferences.getInstance();
     
     // Store in memory map
-    _listTasks[_listTitle] = List.from(_tasks);
+    _listTasks[_currentListId] = List.from(_tasks);
     
     // Convert tasks to JSON
     final List<String> tasksJson = _tasks.map((task) => 
@@ -296,40 +303,33 @@ Future<void> _loadListTitle() async {
     ).toList();
     
     // Save JSON string list to SharedPreferences with list-specific key
-    await prefs.setStringList('tasks_$_listTitle', tasksJson);
-    
-    // For backward compatibility
-    if (_listTitle == 'Today') {
-      await prefs.setStringList('tasks', tasksJson);
-    }
+    await prefs.setStringList('tasks_${_currentListId}', tasksJson);
   }
 
   // Load tasks from SharedPreferences
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Try to load lists first
     final listNames = prefs.getStringList('lists') ?? ['Today'];
-    
-    // For each list, try to load its tasks
+    final savedListId = prefs.getString('list_title') ?? 'Today';
+
+    _listTasks = {};
     for (final listName in listNames) {
       final tasksKey = 'tasks_$listName';
       final List<String>? tasksJson = prefs.getStringList(tasksKey);
-      
+
       if (tasksJson != null) {
-        // Convert JSON to tasks for this list
-        _listTasks[listName] = tasksJson.map((taskJson) => 
+        _listTasks[listName] = tasksJson.map((taskJson) =>
           Task.fromJson(jsonDecode(taskJson))
         ).toList();
       } else {
-        // Initialize with empty list if no tasks found
         _listTasks[listName] = [];
       }
     }
-    
-    // Set the current tasks to the current list's tasks
+
     setState(() {
-      _tasks = _listTasks[_currentListId] ?? [];
+      _currentListId = savedListId;
+      _listTitle = savedListId;
+      _tasks = List.from(_listTasks[_currentListId] ?? []);
     });
   }
   
@@ -365,7 +365,7 @@ Future<void> _loadListTitle() async {
     });
     
     // Save tasks including the new empty one
-    _saveTasks();
+    _saveCurrentTasks();
     
     // Ensure the text field is focused with visible cursor
     _focusTextField();
@@ -435,16 +435,11 @@ Future<void> _loadListTitle() async {
       final index = _editingIndex!;
       
       if (_taskController.text.isEmpty) {
-        // Only remove the task if we're actually losing focus (not creating a new task)
-        // We handle this by setting a flag or checking navigation direction
         setState(() {
           _tasks.removeAt(index);
-          // Note: we don't clear _editingIndex here, as that will happen in the code
-          // that called this method when moving to a different task
         });
       } else {
         setState(() {
-          // Create a copy of the task with updated title but preserve all other properties
           final Task updatedTask = Task(
             title: _taskController.text,
             isCompleted: _tasks[index].isCompleted,
@@ -453,14 +448,12 @@ Future<void> _loadListTitle() async {
             id: _tasks[index].id,
             subtasks: List<Task>.from(_tasks[index].subtasks)
           );
-          
-          // Replace the task at the index
           _tasks[index] = updatedTask;
         });
       }
       
-      // Save tasks
-      _saveTasks();
+      // Save the current list's tasks
+      _saveCurrentTasks();
     }
   }
 
@@ -510,29 +503,22 @@ Future<void> _loadListTitle() async {
 
   // Toggle task completion
   void _toggleTask(int index) {
-    // Check index bounds
-    if (index < 0 || index >= _tasks.length) {
-      return;
-    }
+    if (index < 0 || index >= _tasks.length) return;
     
     _snapshotTasks();
-    // Save any current editing first
     if (_editingIndex != null) {
       _saveCurrentEditing();
     }
     
     setState(() {
-      // Update editing index if necessary
       if (_editingIndex == index) {
         _editingIndex = null;
         _taskController.clear();
       }
-      
-      // Simply toggle the completion status without moving the task
       _tasks[index].isCompleted = !_tasks[index].isCompleted;
     });
     
-    _saveTasks();
+    _saveCurrentTasks();
   }
 
   // Delete task
@@ -547,7 +533,7 @@ Future<void> _loadListTitle() async {
         _editingIndex = _editingIndex! - 1;
       }
     });
-    _saveTasks();
+    _saveCurrentTasks();
   }
 
   // Simplified nesting function to get core functionality working
@@ -824,9 +810,33 @@ Future<void> _loadListTitle() async {
                 Sidebar(
                   key: _sidebarKey,
                   currentListTitle: _listTitle,
-                  onListSelected: (listName) {
-                    _saveCurrentTasks();
-                    _loadTasksForList(listName);
+                  onListSelected: (listName) async {
+                    // Save current tasks before switching
+                    await _saveCurrentTasks();
+
+                    // Clear any current editing state
+                    setState(() {
+                      _editingIndex = null;
+                      _taskController.clear();
+                      _taskFocusNode.unfocus();
+                    });
+
+                    // If this is a new list, initialize it with empty tasks
+                    if (!_listTasks.containsKey(listName)) {
+                      _listTasks[listName] = [];
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setStringList('tasks_$listName', []);
+                    }
+
+                    setState(() {
+                      _currentListId = listName;
+                      _listTitle = listName;
+                      _tasks = List.from(_listTasks[listName]!);
+                    });
+
+                    // Save the current list title
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('list_title', listName);
                   },
                   onListRenamed: (oldName, newName) {
                     // This handles when a list is renamed in the sidebar
@@ -841,6 +851,7 @@ Future<void> _loadListTitle() async {
                       if (_listTasks.containsKey(oldName)) {
                         _listTasks[newName] = _listTasks[oldName]!;
                         _listTasks.remove(oldName);
+                        _saveTasks();
                       }
                     }
                   },
@@ -849,10 +860,10 @@ Future<void> _loadListTitle() async {
                   child: SafeArea(
                     child: Padding(
                       padding: const EdgeInsets.all(10.0),
-                      child: Column(
+        child: Column(
                         mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
+          children: <Widget>[
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                             child: SizedBox(
@@ -989,7 +1000,7 @@ Future<void> _loadListTitle() async {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                  Text(
+            Text(
                                       "Show completed tasks",
                                       style: TextStyle(
                                         fontSize: 12,
@@ -1474,23 +1485,38 @@ Future<void> _loadListTitle() async {
     _saveListTitle();
   }
 
-  void _saveCurrentTasks() {
-    // Store current tasks in the map
-    _listTasks[_listTitle] = List.from(_tasks);
-    _saveTasks();
+  Future<void> _saveCurrentTasks() async {
+    if (_currentListId.isEmpty) return;
+    
+    // Store in memory map
+    _listTasks[_currentListId] = List.from(_tasks);
+    
+    // Convert tasks to JSON and save them
+    final List<String> tasksJson = _tasks.map((task) => 
+      jsonEncode(task.toJson())
+    ).toList();
+    
+    // Save to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('tasks_$_currentListId', tasksJson);
   }
 
 Future<void> _loadTasksForList(String listName) async {
+  // Save current tasks in the current list before switching
+  _saveCurrentTasks();
+  
   final prefs = await SharedPreferences.getInstance();
   final tasksKey = 'tasks_$listName';
   final List<String>? tasksJson = prefs.getStringList(tasksKey);
 
   List<Task> loadedTasks = [];
 
+  // Only load tasks if they exist in SharedPreferences
   if (tasksJson != null) {
     loadedTasks = tasksJson.map((taskJson) =>
         Task.fromJson(jsonDecode(taskJson))).toList();
   } else if (listName == 'Today') {
+    // Only load legacy tasks for the 'Today' list
     final legacyTasksJson = prefs.getStringList('tasks');
     if (legacyTasksJson != null) {
       loadedTasks = legacyTasksJson.map((taskJson) =>
@@ -1499,9 +1525,18 @@ Future<void> _loadTasksForList(String listName) async {
   }
 
   setState(() {
+    // Clear focus and editing state
+    _editingIndex = null;
+    _taskController.clear();
+    _taskFocusNode.unfocus();
+    
+    // Update list info
     _tasks = loadedTasks;
     _listTitle = listName;
     _currentListId = listName;
+    
+    // Always update _listTasks with the current tasks
+    _listTasks[listName] = loadedTasks;
   });
 }
 } // End of _MyHomePageState class
