@@ -314,8 +314,16 @@ Future<void> _loadListTitle() async {
 
     _listTasks = {};
     for (final listName in listNames) {
+      // Try both new and old key formats
       final tasksKey = 'tasks_$listName';
-      final List<String>? tasksJson = prefs.getStringList(tasksKey);
+      final oldTasksKey = 'tasks';  // Old format might have used this
+      
+      List<String>? tasksJson = prefs.getStringList(tasksKey);
+      
+      // If not found with new key, try old key
+      if (tasksJson == null && listName == 'Today') {
+        tasksJson = prefs.getStringList(oldTasksKey);
+      }
 
       if (tasksJson != null) {
         _listTasks[listName] = tasksJson.map((taskJson) =>
@@ -811,10 +819,32 @@ Future<void> _loadListTitle() async {
                   key: _sidebarKey,
                   currentListTitle: _listTitle,
                   onListSelected: (listName) async {
-                    // Save current tasks before switching
-                    await _saveCurrentTasks();
+                    // If there's a task being edited, save it or remove it if empty
+                    if (_editingIndex != null) {
+                      if (_taskController.text.isEmpty) {
+                        // Remove empty task
+                        setState(() {
+                          _tasks.removeAt(_editingIndex!);
+                        });
+                      } else {
+                        // Save the current task's content
+                        final Task updatedTask = Task(
+                          title: _taskController.text,
+                          isCompleted: _tasks[_editingIndex!].isCompleted,
+                          isCollapsed: _tasks[_editingIndex!].isCollapsed,
+                          isTitle: _tasks[_editingIndex!].isTitle,
+                          id: _tasks[_editingIndex!].id,
+                          subtasks: List<Task>.from(_tasks[_editingIndex!].subtasks)
+                        );
+                        setState(() {
+                          _tasks[_editingIndex!] = updatedTask;
+                        });
+                      }
+                      // Save the current list's tasks
+                      await _saveCurrentTasks();
+                    }
 
-                    // Clear any current editing state
+                    // Clear editing state
                     setState(() {
                       _editingIndex = null;
                       _taskController.clear();
@@ -1278,7 +1308,10 @@ Future<void> _loadListTitle() async {
                                       
                                       return Padding(
                                         key: Key('task_${task.id}'),
-                                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                        padding: EdgeInsets.only(
+                                          top: _isTitleTask(task) ? 10.0 : 4.0,
+                                          bottom: 4.0,
+                                        ),
                                         child: MouseRegion(
                                           onEnter: (_) => setState(() => _hoveredIndex = index),
                                           onExit: (_) => setState(() => _hoveredIndex = null),
