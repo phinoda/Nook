@@ -56,6 +56,7 @@ class MyApp extends StatelessWidget {
       title: 'Nook',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        fontFamily: 'Avenir',
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.grey,
           primary: Colors.black,
