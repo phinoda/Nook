@@ -100,6 +100,8 @@ class MyApp extends StatelessWidget {
   }
 }
 
+enum TaskPriority { none, low, medium, high }
+
 class Task {
   String title;
   bool isCompleted;
@@ -107,6 +109,7 @@ class Task {
   bool isTitle;
   String id;
   List<Task> subtasks;
+  TaskPriority priority;
   
   Task({
     required this.title,
@@ -115,6 +118,7 @@ class Task {
     bool? isTitle,
     String? id,
     List<Task>? subtasks,
+    this.priority = TaskPriority.none,
   })  : this.isTitle = isTitle ?? false,
         this.id = id ?? DateTime.now().millisecondsSinceEpoch.toString() + '_' + (title.hashCode).toString(),
         this.subtasks = subtasks ?? [];
@@ -128,6 +132,7 @@ class Task {
       'isTitle': isTitle,
       'id': id,
       'subtasks': subtasks.map((subtask) => subtask.toJson()).toList(),
+      'priority': priority.index,
     };
   }
   
@@ -150,6 +155,7 @@ class Task {
       isTitle: (json['isTitle'] as bool?) ?? false,
       id: (json['id'] as String?) ?? DateTime.now().millisecondsSinceEpoch.toString(),
       subtasks: parsedSubtasks,
+      priority: TaskPriority.values[json['priority'] as int? ?? 0],
     );
   }
 }
@@ -206,7 +212,7 @@ class _MyHomePageState extends State<MyHomePage> {
       if (!_titleFocusNode.hasFocus && _isEditingTitle) {
         final trimmed = _titleController.text.trim();
         if (trimmed.isNotEmpty && trimmed != _listTitle) {
-          setState(() {
+    setState(() {
             _listTitle = trimmed;
             _isEditingTitle = false;
           });
@@ -396,7 +402,8 @@ Future<void> _loadListTitle() async {
           isCollapsed: _tasks[currentIndex].isCollapsed,
           isTitle: _tasks[currentIndex].isTitle,
           id: _tasks[currentIndex].id,
-          subtasks: List<Task>.from(_tasks[currentIndex].subtasks)
+          subtasks: List<Task>.from(_tasks[currentIndex].subtasks),
+          priority: _tasks[currentIndex].priority,
         );
         
         // Replace the task at the index
@@ -455,7 +462,8 @@ Future<void> _loadListTitle() async {
             isCollapsed: _tasks[index].isCollapsed,
             isTitle: _tasks[index].isTitle,
             id: _tasks[index].id,
-            subtasks: List<Task>.from(_tasks[index].subtasks)
+            subtasks: List<Task>.from(_tasks[index].subtasks),
+            priority: _tasks[index].priority,
           );
           _tasks[index] = updatedTask;
         });
@@ -835,7 +843,8 @@ Future<void> _loadListTitle() async {
                           isCollapsed: _tasks[_editingIndex!].isCollapsed,
                           isTitle: _tasks[_editingIndex!].isTitle,
                           id: _tasks[_editingIndex!].id,
-                          subtasks: List<Task>.from(_tasks[_editingIndex!].subtasks)
+                          subtasks: List<Task>.from(_tasks[_editingIndex!].subtasks),
+                          priority: _tasks[_editingIndex!].priority,
                         );
                         setState(() {
                           _tasks[_editingIndex!] = updatedTask;
@@ -986,7 +995,7 @@ Future<void> _loadListTitle() async {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
+            Text(
                                       "Progress",
                                       style: TextStyle(
                                         fontSize: 12,
@@ -1000,9 +1009,9 @@ Future<void> _loadListTitle() async {
                                         color: Colors.grey.shade700,
                                         fontWeight: FontWeight.w500,
                                       ),
-                                    ),
-                                  ],
-                                ),
+            ),
+          ],
+        ),
                                 SizedBox(height: 5),
                                 // Progress bar
                                 Container(
@@ -1314,8 +1323,6 @@ Future<void> _loadListTitle() async {
                                           bottom: 4.0,
                                         ),
                                         child: MouseRegion(
-                                          onEnter: (_) => setState(() => _hoveredIndex = index),
-                                          onExit: (_) => setState(() => _hoveredIndex = null),
                                           cursor: SystemMouseCursors.click,
                                           child: ReorderableDragStartListener(
                                             index: index,
@@ -1325,6 +1332,43 @@ Future<void> _loadListTitle() async {
                                                 if (index >= 0 && index < _tasks.length) {
                                                   _startEditingTask(index);
                                                 }
+                                              },
+                                              onSecondaryTapDown: (details) {
+                                                final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+                                                final RelativeRect position = RelativeRect.fromRect(
+                                                  Rect.fromPoints(
+                                                    details.globalPosition,
+                                                    details.globalPosition,
+                                                  ),
+                                                  Offset.zero & overlay.size,
+                                                );
+
+                                                showMenu(
+                                                  context: context,
+                                                  position: position,
+                                                  items: [
+                                                    PopupMenuItem(
+                                                      value: 'delete',
+                                                      height: 32,
+                                                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                      child: Text('Delete', style: TextStyle(fontSize: 12)),
+                                                    ),
+                                                    PopupMenuItem(
+                                                      value: 'priority',
+                                                      height: 32,
+                                                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                      child: Row(
+                                                        children: [
+                                                          Text('Priority', style: TextStyle(fontSize: 12)),
+                                                          Spacer(),
+                                                          Icon(Icons.chevron_right, size: 16),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                  color: Colors.white,
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                );
                                               },
                                               child: Row(
                                                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1433,6 +1477,7 @@ Future<void> _loadListTitle() async {
       isTitle: t.isTitle ?? false,
       id: t.id,
       subtasks: List<Task>.from(t.subtasks),
+      priority: t.priority,
     )).toList());
     if (_undoStack.length > 50) {
       _undoStack.removeAt(0);
@@ -1449,6 +1494,7 @@ Future<void> _loadListTitle() async {
         isTitle: t.isTitle ?? false,
         id: t.id,
         subtasks: List<Task>.from(t.subtasks),
+        priority: t.priority,
       )).toList());
       
       _tasks = _undoStack.removeLast();
@@ -1468,6 +1514,7 @@ Future<void> _loadListTitle() async {
         isTitle: t.isTitle ?? false,
         id: t.id,
         subtasks: List<Task>.from(t.subtasks),
+        priority: t.priority,
       )).toList());
       
       _tasks = _redoStack.removeLast();
@@ -1572,5 +1619,19 @@ Future<void> _loadTasksForList(String listName) async {
     // Always update _listTasks with the current tasks
     _listTasks[listName] = loadedTasks;
   });
+}
+
+// Add this helper function to get priority color
+Color _getPriorityColor(TaskPriority priority) {
+  switch (priority) {
+    case TaskPriority.none:
+      return Colors.grey;
+    case TaskPriority.low:
+      return Colors.blue;
+    case TaskPriority.medium:
+      return Colors.orange;
+    case TaskPriority.high:
+      return Colors.red;
+  }
 }
 } // End of _MyHomePageState class

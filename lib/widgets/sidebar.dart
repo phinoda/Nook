@@ -115,21 +115,29 @@ class SidebarState extends State<Sidebar> {
                     index: index,
                     child: GestureDetector(
                       onSecondaryTapDown: (details) {
+                        final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+                        final RelativeRect position = RelativeRect.fromRect(
+                          Rect.fromPoints(
+                            details.globalPosition,
+                            details.globalPosition,
+                          ),
+                          Offset.zero & overlay.size,
+                        );
+
                         showMenu(
                           context: context,
-                          position: RelativeRect.fromLTRB(
-                            details.globalPosition.dx,
-                            details.globalPosition.dy,
-                            details.globalPosition.dx,
-                            details.globalPosition.dy,
-                          ),
+                          position: position,
                           items: [
                             PopupMenuItem(
                               value: 'rename',
+                              height: 32,
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                               child: Text('Rename', style: TextStyle(fontSize: 12)),
                             ),
                             PopupMenuItem(
                               value: 'delete',
+                              height: 32,
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                               child: Text('Delete', style: TextStyle(fontSize: 12)),
                             ),
                           ],
