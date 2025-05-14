@@ -19,7 +19,6 @@ class Sidebar extends StatefulWidget {
 
 class SidebarState extends State<Sidebar> {
   List<String> _lists = ['Today'];
-  Set<String> _pinnedLists = {'Today'};
   int? _editingIndex;
   final TextEditingController _editListController = TextEditingController();
   
@@ -32,17 +31,13 @@ class SidebarState extends State<Sidebar> {
   Future<void> _loadLists() async {
     final prefs = await SharedPreferences.getInstance();
     final savedLists = prefs.getStringList('lists');
-    final savedPinnedLists = prefs.getStringList('pinned_lists') ?? ['Today'];
-    
     if (savedLists != null && savedLists.isNotEmpty) {
       setState(() {
         _lists = savedLists;
-        _pinnedLists = savedPinnedLists.toSet();
-        // Ensure "Today" is always in the list and pinned
+        // Ensure "Today" is always in the list
         if (!_lists.contains('Today')) {
           _lists.insert(0, 'Today');
         }
-        _pinnedLists.add('Today');
       });
     }
   }
@@ -50,19 +45,6 @@ class SidebarState extends State<Sidebar> {
   Future<void> _saveLists() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('lists', _lists);
-    await prefs.setStringList('pinned_lists', _pinnedLists.toList());
-  }
-
-  void _togglePin(int index) {
-    final listName = _lists[index];
-    setState(() {
-      if (_pinnedLists.contains(listName)) {
-        _pinnedLists.remove(listName);
-      } else {
-        _pinnedLists.add(listName);
-      }
-    });
-    _saveLists();
   }
 
   void _addNewList() {
@@ -71,8 +53,6 @@ class SidebarState extends State<Sidebar> {
       _lists.add(newListName);
     });
     _saveLists();
-    
-    // Select the new list - this will trigger onListSelected with an empty list
     widget.onListSelected(newListName);
   }
 
@@ -88,11 +68,8 @@ class SidebarState extends State<Sidebar> {
 
   void _deleteList(int index) async {
     final listToDelete = _lists[index];
-    
-    // Delete the list's tasks from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('tasks_$listToDelete');
-    
     setState(() {
       _lists.removeAt(index);
     });
@@ -101,16 +78,6 @@ class SidebarState extends State<Sidebar> {
 
   @override
   Widget build(BuildContext context) {
-    // Sort lists to put pinned ones at the top
-    final sortedLists = List<String>.from(_lists)
-      ..sort((a, b) {
-        final aPinned = _pinnedLists.contains(a);
-        final bPinned = _pinnedLists.contains(b);
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-        return _lists.indexOf(a).compareTo(_lists.indexOf(b));
-      });
-
     return Container(
       width: 200,
       color: Colors.grey.shade50,
@@ -120,32 +87,28 @@ class SidebarState extends State<Sidebar> {
           children: [
             Expanded(
               child: ReorderableListView.builder(
-                itemCount: sortedLists.length,
+                itemCount: _lists.length,
                 buildDefaultDragHandles: false,
+                proxyDecorator: (child, index, animation) {
+                  return Material(
+                    elevation: 0,
+                    color: Colors.transparent,
+                    child: child,
+                  );
+                },
                 onReorder: (oldIndex, newIndex) {
-                  // Adjust indices for pinned items
-                  final oldItem = sortedLists[oldIndex];
-                  final newItem = sortedLists[newIndex];
-                  
-                  // Don't allow reordering if either item is pinned
-                  if (_pinnedLists.contains(oldItem) || _pinnedLists.contains(newItem)) {
-                    return;
-                  }
-                  
-                  // Calculate actual indices in _lists
-                  final actualOldIndex = _lists.indexOf(oldItem);
-                  final actualNewIndex = _lists.indexOf(newItem);
-                  
                   setState(() {
-                    final item = _lists.removeAt(actualOldIndex);
-                    _lists.insert(actualNewIndex, item);
+                    if (oldIndex < newIndex) {
+                      newIndex -= 1;
+                    }
+                    final item = _lists.removeAt(oldIndex);
+                    _lists.insert(newIndex, item);
                   });
                   _saveLists();
                 },
                 itemBuilder: (context, index) {
-                  final listName = sortedLists[index];
+                  final listName = _lists[index];
                   final isCurrentList = listName == widget.currentListTitle;
-                  final isPinned = _pinnedLists.contains(listName);
                   
                   return ReorderableDragStartListener(
                     key: Key(listName),
@@ -166,13 +129,6 @@ class SidebarState extends State<Sidebar> {
                               child: Text('Rename', style: TextStyle(fontSize: 12)),
                             ),
                             PopupMenuItem(
-                              value: isPinned ? 'unpin' : 'pin',
-                              child: Text(
-                                isPinned ? 'Unpin' : 'Pin',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                            PopupMenuItem(
                               value: 'delete',
                               child: Text('Delete', style: TextStyle(fontSize: 12)),
                             ),
@@ -182,35 +138,25 @@ class SidebarState extends State<Sidebar> {
                         ).then((value) {
                           if (value == 'rename') {
                             setState(() {
-                              _editingIndex = _lists.indexOf(listName);
+                              _editingIndex = index;
                               _editListController.text = listName;
                             });
-                          } else if (value == 'pin' || value == 'unpin') {
-                            _togglePin(_lists.indexOf(listName));
                           } else if (value == 'delete') {
-                            _deleteList(_lists.indexOf(listName));
+                            _deleteList(index);
                           }
                         });
                       },
                       child: ListTile(
                         dense: true,
-                        leading: isPinned ? Transform.rotate(
-                          angle: 0.785398, // 45 degrees in radians (π/4)
-                          child: Icon(Icons.push_pin, size: 16, color: Colors.black),
-                        ) : null,
-                        contentPadding: EdgeInsets.only(
-                          left: isPinned ? 16.0 : 40.0, // Add padding for non-pinned items
-                          right: 16.0,
-                        ),
-                        horizontalTitleGap: 2,
-                        title: _editingIndex == _lists.indexOf(listName)
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16.0),
+                        title: _editingIndex == index
                           ? TextField(
                               controller: _editListController,
                               autofocus: true,
                               onSubmitted: (newName) {
                                 final oldName = listName;
                                 setState(() {
-                                  _lists[_lists.indexOf(listName)] = newName;
+                                  _lists[index] = newName;
                                   _editingIndex = null;
                                 });
                                 _saveLists();
