@@ -299,8 +299,8 @@ Future<void> _loadListTitle() async {
 
   // Save tasks to SharedPreferences
   Future<void> _saveTasks() async {
-    final prefs = await SharedPreferences.getInstance();
     
+    final prefs = await SharedPreferences.getInstance();    
     // Store in memory map
     _listTasks[_currentListId] = List.from(_tasks);
     
@@ -308,9 +308,13 @@ Future<void> _loadListTitle() async {
     final List<String> tasksJson = _tasks.map((task) => 
       jsonEncode(task.toJson())
     ).toList();
-    
+        
     // Save JSON string list to SharedPreferences with list-specific key
-    await prefs.setStringList('tasks_${_currentListId}', tasksJson);
+    final key = 'tasks_${_currentListId}';    
+    await prefs.setStringList(key, tasksJson);
+    
+    // Also save the list title
+    await prefs.setString('list_title', _listTitle);
   }
 
   // Load tasks from SharedPreferences
@@ -878,20 +882,26 @@ Future<void> _loadListTitle() async {
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setString('list_title', listName);
                   },
-                  onListRenamed: (oldName, newName) {
-                    // This handles when a list is renamed in the sidebar
+                  onListRenamed: (oldName, newName) async {
                     if (oldName == _listTitle) {
                       setState(() {
                         _listTitle = newName;
                         _currentListId = newName;
                       });
                       _saveListTitle();
-                      
-                      // Transfer tasks from old name to new name
+
+                      // Transfer tasks from old name to new name in memory
                       if (_listTasks.containsKey(oldName)) {
                         _listTasks[newName] = _listTasks[oldName]!;
                         _listTasks.remove(oldName);
-                        _saveTasks();
+
+                        // Save tasks under the new name in SharedPreferences
+                        final prefs = await SharedPreferences.getInstance();
+                        final List<String> tasksJson = _listTasks[newName]!.map((task) => jsonEncode(task.toJson())).toList();
+                        await prefs.setStringList('tasks_$newName', tasksJson);
+
+                        // Remove the old tasks entry from SharedPreferences
+                        await prefs.remove('tasks_$oldName');
                       }
                     }
                   },
@@ -1368,7 +1378,11 @@ Future<void> _loadListTitle() async {
                                                   ],
                                                   color: Colors.white,
                                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                );
+                                                ).then((value) {
+                                                  if (value == 'delete') {
+                                                    _deleteTask(actualIndex);
+                                                  }
+                                                });
                                               },
                                               child: Row(
                                                 crossAxisAlignment: CrossAxisAlignment.center,

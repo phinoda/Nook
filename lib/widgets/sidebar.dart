@@ -21,7 +21,7 @@ class SidebarState extends State<Sidebar> {
   List<String> _lists = ['Today'];
   int? _editingIndex;
   final TextEditingController _editListController = TextEditingController();
-  
+
   @override
   void initState() {
     super.initState();
@@ -74,6 +74,17 @@ class SidebarState extends State<Sidebar> {
       _lists.removeAt(index);
     });
     _saveLists();
+
+    // Notify parent if the deleted list was the current one
+    if (widget.currentListTitle == listToDelete) {
+      if (_lists.isNotEmpty) {
+        // Select the first available list
+        widget.onListSelected(_lists.first);
+      } else {
+        // No lists left, clear selection
+        widget.onListSelected('');
+      }
+    }
   }
 
   @override
@@ -83,11 +94,11 @@ class SidebarState extends State<Sidebar> {
       color: Colors.grey.shade50,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
-        child: Column(
-          children: [
-            Expanded(
+      child: Column(
+        children: [
+          Expanded(
               child: ReorderableListView.builder(
-                itemCount: _lists.length,
+              itemCount: _lists.length,
                 buildDefaultDragHandles: false,
                 proxyDecorator: (child, index, animation) {
                   return Material(
@@ -106,7 +117,7 @@ class SidebarState extends State<Sidebar> {
                   });
                   _saveLists();
                 },
-                itemBuilder: (context, index) {
+              itemBuilder: (context, index) {
                   final listName = _lists[index];
                   final isCurrentList = listName == widget.currentListTitle;
                   
@@ -185,23 +196,23 @@ class SidebarState extends State<Sidebar> {
                                 fontWeight: isCurrentList ? FontWeight.bold : FontWeight.normal,
                                 color: isCurrentList ? Colors.black : Colors.grey.shade800,
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                         selected: isCurrentList,
                         selectedTileColor: Colors.grey.shade200,
-                        onTap: () {
+                  onTap: () {
                           widget.onListSelected(listName);
-                        },
+                  },
                       ),
                     ),
-                  );
-                },
-              ),
+                );
+              },
             ),
-            Divider(height: 1),
-            GestureDetector(
-              onTap: _addNewList,
-              child: Padding(
+          ),
+          Divider(height: 1),
+          GestureDetector(
+            onTap: _addNewList,
+            child: Padding(
                 padding: const EdgeInsets.all(18.0),
                 child: Row(
                   children: [
@@ -212,9 +223,9 @@ class SidebarState extends State<Sidebar> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ],
+            ),
+          ),
+        ],
                 ),
               ),
             ),
