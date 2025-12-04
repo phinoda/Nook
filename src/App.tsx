@@ -1,36 +1,51 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { MainView } from '@/components/MainView';
+import { useNookStore } from '@/store';
+import { useEffect, useRef } from 'react';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const { lists, createList, setActiveList, createItem } = useNookStore();
+  const initialized = useRef(false);
+
+  // Create welcome list with sample tasks on first load
+  useEffect(() => {
+    // Prevent double initialization in React Strict Mode
+    if (initialized.current) return;
+
+    if (lists.length === 0) {
+      initialized.current = true;
+
+      // Create the welcome list
+      createList('Welcome to your nook');
+
+      // Get the newly created list ID
+      const newListId = useNookStore.getState().lists[0]?.id;
+
+      if (newListId) {
+        // Create sample tasks
+        const sampleTasks = [
+          'Create your first list',
+          'Add your first task to it',
+          'Add tags to your tasks',
+          'Organize your tasks to your likings',
+          'Pour yourself some coffee',
+        ];
+
+        sampleTasks.forEach((taskText) => {
+          createItem(newListId, taskText, 'task');
+        });
+
+        setActiveList(newListId);
+      }
+    } else if (!useNookStore.getState().activeListId) {
+      setActiveList(lists[0].id);
+    }
+  }, [lists, createList, setActiveList, createItem]);
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          Today's coconut number is {count}
-
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="h-screen w-full bg-background">
+      <MainView />
+    </div>
+  );
 }
 
-export default App
+export default App;

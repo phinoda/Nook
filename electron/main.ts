@@ -81,12 +81,11 @@ const createWindow = () => {
     mainWindow = new BrowserWindow({
         width: WINDOW_WIDTH,
         height: height,
-        x: width, // Start off-screen
+        x: width - WINDOW_WIDTH, // Position on right edge (visible)
         y: 0,
         frame: false,
-        transparent: true,
-        alwaysOnTop: true,
-        show: false, // Don't show initially
+        transparent: false, // Disabled for dev - enable later
+        show: true, // Show for dev
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: true,
@@ -94,9 +93,15 @@ const createWindow = () => {
         },
     });
 
+    // robust window configuration for "always on top" behavior across workspaces
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    mainWindow.setFullScreenable(false);
+
     // Load the index.html of the app.
     if (process.env.NODE_ENV === 'development') {
         mainWindow.loadURL('http://localhost:5173');
+        mainWindow.webContents.openDevTools();
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
     }

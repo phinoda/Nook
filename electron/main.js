@@ -7,13 +7,15 @@ if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
 }
 var mainWindow = null;
-var createWindow = function () {
-    var _a = electron_1.screen.getPrimaryDisplay().workAreaSize, width = _a.width, height = _a.height;
+var createWindow = function() {
+    var _a = electron_1.screen.getPrimaryDisplay().workAreaSize,
+        width = _a.width,
+        height = _a.height;
     // Create the browser window.
     mainWindow = new electron_1.BrowserWindow({
-        width: 400, // Initial width
+        width: 600, // Initial width
         height: height, // Full height
-        x: width - 400, // Position on the right
+        x: 0,
         y: 0,
         frame: false, // No title bar
         transparent: true, // Transparent background
@@ -27,8 +29,7 @@ var createWindow = function () {
     // Load the index.html of the app.
     if (process.env.NODE_ENV === 'development') {
         mainWindow.loadURL('http://localhost:5173');
-    }
-    else {
+    } else {
         mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
     }
     // Open the DevTools.
@@ -38,12 +39,12 @@ var createWindow = function () {
 // initialization and is ready to create browser windows.
 electron_1.app.on('ready', createWindow);
 // Quit when all windows are closed, except on macOS.
-electron_1.app.on('window-all-closed', function () {
+electron_1.app.on('window-all-closed', function() {
     if (process.platform !== 'darwin') {
         electron_1.app.quit();
     }
 });
-electron_1.app.on('activate', function () {
+electron_1.app.on('activate', function() {
     if (electron_1.BrowserWindow.getAllWindows().length === 0) {
         createWindow();
     }
