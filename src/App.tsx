@@ -1,24 +1,25 @@
 import { MainView } from '@/components/MainView';
 import { useNookStore } from '@/store';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 function App() {
-  const { lists, createList, setActiveList, createItem } = useNookStore();
-  const initialized = useRef(false);
+  const { createList, setActiveList, createItem } = useNookStore();
 
   // Create welcome list with sample tasks on first load
+  // Initialize app on mount
   useEffect(() => {
-    // Prevent double initialization in React Strict Mode
-    if (initialized.current) return;
+    // Check state directly to avoid reactive dependencies
+    const state = useNookStore.getState();
+    const hasLists = state.lists.length > 0;
+    const hasActiveList = !!state.activeListId;
 
-    if (lists.length === 0) {
-      initialized.current = true;
-
+    if (!hasLists) {
       // Create the welcome list
       createList('Welcome to your nook');
 
       // Get the newly created list ID
-      const newListId = useNookStore.getState().lists[0]?.id;
+      const newState = useNookStore.getState();
+      const newListId = newState.lists[0]?.id;
 
       if (newListId) {
         // Create sample tasks
@@ -36,10 +37,12 @@ function App() {
 
         setActiveList(newListId);
       }
-    } else if (!useNookStore.getState().activeListId) {
-      setActiveList(lists[0].id);
+    } else if (!hasActiveList) {
+      // Restore selection to first list if nothing selected
+      setActiveList(state.lists[0].id);
     }
-  }, [lists, createList, setActiveList, createItem]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
 
   return (
     <div className="h-screen w-full bg-background">

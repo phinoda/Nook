@@ -13,24 +13,31 @@ let pollingInterval: NodeJS.Timeout | null = null;
 const WINDOW_WIDTH = 400;
 const ANIMATION_DURATION = 200; // ms
 const ANIMATION_STEPS = 20;
-const TRIGGER_ZONE_WIDTH = 10;
+const TRIGGER_ZONE_WIDTH = 20;
 const POLLING_INTERVAL_MS = 100;
 
 const startMousePolling = () => {
     pollingInterval = setInterval(() => {
         const point = screen.getCursorScreenPoint();
-        const { width } = screen.getPrimaryDisplay().workAreaSize;
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const { width, x } = primaryDisplay.bounds; // Use bounds for full edge detection
 
-        // If mouse is in the trigger zone (right edge)
-        if (point.x >= width - TRIGGER_ZONE_WIDTH) {
-            showMainWindow();
+        // Calculate the actual right edge coordinate (usually x + width)
+        const rightEdge = x + width;
+
+        // If mouse is in the trigger zone (right edge of primary display)
+        // AND strictly on the primary display (not on the secondary monitor to the right)
+        if (point.x >= rightEdge - TRIGGER_ZONE_WIDTH && point.x < rightEdge) {
+            if (mainWindow && !mainWindow.isVisible()) {
+                showMainWindow();
+            }
         }
     }, POLLING_INTERVAL_MS);
 };
 
 const showMainWindow = () => {
     if (!mainWindow) return;
-    const { width } = screen.getPrimaryDisplay().workAreaSize;
+    const { width } = screen.getPrimaryDisplay().bounds;
     const targetX = width - WINDOW_WIDTH;
 
     mainWindow.show();
@@ -39,7 +46,7 @@ const showMainWindow = () => {
 
 const hideMainWindow = () => {
     if (!mainWindow) return;
-    const { width } = screen.getPrimaryDisplay().workAreaSize;
+    const { width } = screen.getPrimaryDisplay().bounds;
     const targetX = width;
 
     animateWindow(targetX, () => {
@@ -75,7 +82,7 @@ const animateWindow = (targetX: number, callback?: () => void) => {
 };
 
 const createWindow = () => {
-    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    const { width, height } = screen.getPrimaryDisplay().bounds;
 
     // Create the browser window.
     mainWindow = new BrowserWindow({

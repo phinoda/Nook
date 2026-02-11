@@ -2,6 +2,12 @@ import type { StateCreator } from 'zustand';
 import type { Item, ItemType } from '@/types';
 import { generateId } from '@/utils/id';
 import type { NookStore } from '../useNookStore';
+import {
+    addItemToParent,
+    findAndRemoveItem,
+    removeItemFromTree,
+    updateItemInTree,
+} from '@/utils/treeUtils';
 
 export interface ItemsSlice {
     createItem: (listId: string, text: string, type: ItemType, parentId?: string) => void;
@@ -10,6 +16,15 @@ export interface ItemsSlice {
     toggleItemDone: (listId: string, itemId: string) => void;
     indentItem: (listId: string, itemId: string, newParentId: string) => void;
     unindentItem: (listId: string, itemId: string) => void;
+    moveItem: (
+        listId: string,
+        itemId: string,
+        newParentId: string | null,
+        newIndex: number
+    ) => void;
+    addTagToItem: (listId: string, itemId: string, tagId: string) => void;
+    removeTagFromItem: (listId: string, itemId: string, tagId: string) => void;
+    createItemAfter: (listId: string, currentItemId: string, text?: string) => void;
 }
 
 export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (set) => ({
@@ -26,65 +41,76 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
             updatedAt: new Date(),
         };
 
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
 
-                if (!parentId) {
-                    // Add to root level
-                    return {
-                        ...list,
-                        items: [...list.items, newItem],
-                        updatedAt: new Date(),
-                    };
-                } else {
-                    // Add as child to parent
-                    const addToParent = (items: Item[]): Item[] => {
-                        return items.map((item) => {
-                            if (item.id === parentId) {
-                                return {
-                                    ...item,
-                                    children: [...item.children, newItem],
-                                    type: 'group' as ItemType, // Convert to group when adding child
-                                };
-                            }
-                            if (item.children.length > 0) {
-                                return { ...item, children: addToParent(item.children) };
-                            }
-                            return item;
-                        });
-                    };
+                let newItems: Item[];
 
-                    return {
-                        ...list,
-                        items: addToParent(list.items),
-                        updatedAt: new Date(),
-                    };
+                if (!parentId) {
+                    newItems = [...list.items, newItem];
+                } else {
+                    newItems = addItemToParent(list.items, parentId, newItem);
                 }
+
+                return {
+                    ...list,
+                    items: newItems,
+                    updatedAt: new Date(),
+                };
             }),
         }));
     },
 
-    updateItem: (listId: string, itemId: string, updates: Partial<Item>) => {
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+    createItemAfter: (listId: string, currentItemId: string, text: string = '') => {
+        const newItem: Item = {
+            id: generateId(),
+            type: 'task',
+            text,
+            isDone: false,
+            children: [],
+            note: null,
+            tagIds: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        };
+
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
 
-                const updateInTree = (items: Item[]): Item[] => {
-                    return items.map((item) => {
-                        if (item.id === itemId) {
-                            return { ...item, ...updates, updatedAt: new Date() };
+                const insertAfterFn = (items: Item[]): Item[] => {
+                    return items.flatMap((item) => {
+                        if (item.id === currentItemId) {
+                            return [item, newItem];
                         }
                         if (item.children.length > 0) {
-                            return { ...item, children: updateInTree(item.children) };
+                            return [{ ...item, children: insertAfterFn(item.children) }];
                         }
-                        return item;
+                        return [item];
                     });
                 };
 
                 return {
                     ...list,
-                    items: updateInTree(list.items),
+                    items: insertAfterFn(list.items),
+                    updatedAt: new Date(),
+                };
+            }),
+        }));
+    },
+
+    updateItem: (listId: string, itemId: string, updates: Partial<Item>) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
+                if (list.id !== listId) return list;
+
+                return {
+                    ...list,
+                    items: updateItemInTree(list.items, itemId, (item) => ({
+                        ...item,
+                        ...updates,
+                    })),
                     updatedAt: new Date(),
                 };
             }),
@@ -92,22 +118,13 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
     },
 
     deleteItem: (listId: string, itemId: string) => {
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
-
-                const deleteFromTree = (items: Item[]): Item[] => {
-                    return items
-                        .filter((item) => item.id !== itemId)
-                        .map((item) => ({
-                            ...item,
-                            children: deleteFromTree(item.children),
-                        }));
-                };
 
                 return {
                     ...list,
-                    items: deleteFromTree(list.items),
+                    items: removeItemFromTree(list.items, itemId),
                     updatedAt: new Date(),
                 };
             }),
@@ -115,25 +132,16 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
     },
 
     toggleItemDone: (listId: string, itemId: string) => {
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
-
-                const toggleInTree = (items: Item[]): Item[] => {
-                    return items.map((item) => {
-                        if (item.id === itemId) {
-                            return { ...item, isDone: !item.isDone, updatedAt: new Date() };
-                        }
-                        if (item.children.length > 0) {
-                            return { ...item, children: toggleInTree(item.children) };
-                        }
-                        return item;
-                    });
-                };
 
                 return {
                     ...list,
-                    items: toggleInTree(list.items),
+                    items: updateItemInTree(list.items, itemId, (item) => ({
+                        ...item,
+                        isDone: !item.isDone,
+                    })),
                     updatedAt: new Date(),
                 };
             }),
@@ -141,48 +149,22 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
     },
 
     indentItem: (listId: string, itemId: string, newParentId: string) => {
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
 
-                let itemToMove: Item | null = null;
+                const { item: itemToMove, newItems: itemsWithoutTarget } = findAndRemoveItem(
+                    list.items,
+                    itemId
+                );
 
-                // Find and remove the item from its current location
-                const removeItem = (items: Item[]): Item[] => {
-                    return items
-                        .filter((item) => {
-                            if (item.id === itemId) {
-                                itemToMove = item;
-                                return false;
-                            }
-                            return true;
-                        })
-                        .map((item) => ({
-                            ...item,
-                            children: removeItem(item.children),
-                        }));
-                };
+                if (!itemToMove) return list;
 
-                // Add the item as a child to the new parent
-                const addToParent = (items: Item[]): Item[] => {
-                    return items.map((item) => {
-                        if (item.id === newParentId && itemToMove) {
-                            return {
-                                ...item,
-                                children: [...item.children, itemToMove],
-                                type: 'group' as ItemType,
-                                updatedAt: new Date(),
-                            };
-                        }
-                        if (item.children.length > 0) {
-                            return { ...item, children: addToParent(item.children) };
-                        }
-                        return item;
-                    });
-                };
-
-                const itemsWithoutTarget = removeItem(list.items);
-                const itemsWithMoved = addToParent(itemsWithoutTarget);
+                const itemsWithMoved = addItemToParent(
+                    itemsWithoutTarget,
+                    newParentId,
+                    itemToMove
+                );
 
                 return {
                     ...list,
@@ -194,26 +176,38 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
     },
 
     unindentItem: (listId: string, itemId: string) => {
-        set((state: any) => ({
-            lists: state.lists.map((list: any) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
+
+                // 1. Find the item and its current parent
+                // Since our treeUtils are generic, we might need a specific "findParent" or custom logic here
+                // just for unindenting, or we can use the existing logic if we can determine the parent another way.
+                // However, the original unindent logic was quite specific about "add after parent".
+
+                // Let's implement a specific specialized traversal for unindent here, 
+                // but use treeUtils where possible.
+                // Or better, logic:
+                // 1. Find and remove item.
+                // 2. Find the *old parent*.
+                // 3. Insert item *after* the old parent in the *grandparent's* list (or root).
+
+                // BUT, to keep it simple and correct to the "visual" indentation:
+                // "Unindent" usually means "become a sibling of your parent".
+
+                // Let's stick closer to the original logic but cleaner.
 
                 let itemToMove: Item | null = null;
                 let parentOfItemToMove: Item | null = null;
 
-                // Find the item, its parent, and remove it from current location
                 const findAndRemove = (items: Item[], parent: Item | null = null): Item[] => {
                     const result: Item[] = [];
-                    
                     for (const item of items) {
                         if (item.id === itemId) {
                             itemToMove = item;
                             parentOfItemToMove = parent;
-                            // Don't add this item to result (removing it)
                             continue;
                         }
-                        
-                        // Recursively process children
                         if (item.children.length > 0) {
                             const newChildren = findAndRemove(item.children, item);
                             result.push({ ...item, children: newChildren });
@@ -221,45 +215,103 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
                             result.push(item);
                         }
                     }
-                    
                     return result;
                 };
 
-                // Add the item at the same level as its parent
-                const addAtParentLevel = (items: Item[]): Item[] => {
-                    if (!itemToMove || !parentOfItemToMove) return items;
+                const itemsWithoutTarget = findAndRemove(list.items);
 
+                if (!itemToMove || !parentOfItemToMove) return list; // Already at root or not found
+
+                // Now add itemToMove after parentOfItemToMove
+                const addAfterParent = (items: Item[]): Item[] => {
                     return items.flatMap((item) => {
                         if (item.id === parentOfItemToMove!.id) {
-                            // Found the parent - add the item right after it
                             return [item, itemToMove!];
                         }
-                        
-                        // Recursively search in children
                         if (item.children.length > 0) {
-                            const newChildren = addAtParentLevel(item.children);
-                            // If children changed, it means we found and added the item
-                            if (newChildren !== item.children) {
-                                return [{ ...item, children: newChildren }];
-                            }
+                            return [{ ...item, children: addAfterParent(item.children) }];
                         }
-                        
                         return [item];
                     });
                 };
 
-                const itemsWithoutTarget = findAndRemove(list.items);
-                
-                // If item has no parent, it's already at root level, can't unindent
-                if (!parentOfItemToMove) {
-                    return list;
-                }
+                return {
+                    ...list,
+                    items: addAfterParent(itemsWithoutTarget),
+                    updatedAt: new Date(),
+                };
+            }),
+        }));
+    },
 
-                const itemsWithMoved = addAtParentLevel(itemsWithoutTarget);
+    moveItem: (
+        listId: string,
+        itemId: string,
+        newParentId: string | null,
+        newIndex: number
+    ) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
+                if (list.id !== listId) return list;
+
+                const { item: itemToMove, newItems: itemsWithoutTarget } = findAndRemoveItem(
+                    list.items,
+                    itemId
+                );
+
+                if (!itemToMove) return list;
+
+                let newItems: Item[];
+
+                if (newParentId === null) {
+                    newItems = [...itemsWithoutTarget];
+                    newItems.splice(newIndex, 0, itemToMove);
+                } else {
+                    newItems = addItemToParent(
+                        itemsWithoutTarget,
+                        newParentId,
+                        itemToMove,
+                        newIndex
+                    );
+                }
 
                 return {
                     ...list,
-                    items: itemsWithMoved,
+                    items: newItems,
+                    updatedAt: new Date(),
+                };
+            }),
+        }));
+    },
+
+    addTagToItem: (listId: string, itemId: string, tagId: string) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
+                if (list.id !== listId) return list;
+
+                return {
+                    ...list,
+                    items: updateItemInTree(list.items, itemId, (item) => ({
+                        ...item,
+                        tagIds: [...new Set([...item.tagIds, tagId])],
+                    })),
+                    updatedAt: new Date(),
+                };
+            }),
+        }));
+    },
+
+    removeTagFromItem: (listId: string, itemId: string, tagId: string) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
+                if (list.id !== listId) return list;
+
+                return {
+                    ...list,
+                    items: updateItemInTree(list.items, itemId, (item) => ({
+                        ...item,
+                        tagIds: item.tagIds.filter((id) => id !== tagId),
+                    })),
                     updatedAt: new Date(),
                 };
             }),

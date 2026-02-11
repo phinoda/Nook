@@ -1,6 +1,6 @@
 import { useNookStore } from '@/store';
 import type { Item as ItemType } from '@/types';
-import { Trash2 } from 'lucide-react';
+import { Trash2, GripVertical } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 interface ItemProps {
@@ -8,13 +8,30 @@ interface ItemProps {
     listId: string;
     previousItemId?: string;
     depth?: number;
+    dragHandleProps?: {
+        ref: (element: HTMLElement | null) => void;
+        [key: string]: unknown;
+    };
 }
 
-export function Item({ item, listId, previousItemId, depth = 0 }: ItemProps) {
-    const { toggleItemDone, deleteItem, updateItem, indentItem, unindentItem } = useNookStore();
+export function Item({ item, listId, previousItemId, depth = 0, dragHandleProps }: ItemProps) {
+    const { toggleItemDone, deleteItem, updateItem, indentItem, unindentItem, createItemAfter } = useNookStore();
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState(item.text);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const adjustTextareaHeight = (element: HTMLTextAreaElement) => {
+        element.style.height = 'auto';
+        element.style.height = `${element.scrollHeight}px`;
+    };
+
+    // Sync editText with item.text when item changes
+    // Sync editText with item.text when item changes (derived state)
+    const [prevText, setPrevText] = useState(item.text);
+    if (item.text !== prevText) {
+        setPrevText(item.text);
+        setEditText(item.text);
+    }
 
     const handleToggle = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -31,8 +48,9 @@ export function Item({ item, listId, previousItemId, depth = 0 }: ItemProps) {
     };
 
     const handleSave = () => {
-        if (editText.trim() !== item.text) {
-            updateItem(listId, item.id, { text: editText.trim() });
+        const trimmedText = editText.trim();
+        if (trimmedText !== item.text) {
+            updateItem(listId, item.id, { text: trimmedText });
         }
         setIsEditing(false);
     };
@@ -41,9 +59,14 @@ export function Item({ item, listId, previousItemId, depth = 0 }: ItemProps) {
         handleSave();
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); // Prevent new line
             handleSave();
+            createItemAfter(listId, item.id);
+        } else if (e.key === 'Backspace' && editText === '') {
+            e.preventDefault();
+            deleteItem(listId, item.id);
         } else if (e.key === 'Escape') {
             setEditText(item.text);
             setIsEditing(false);
@@ -61,13 +84,30 @@ export function Item({ item, listId, previousItemId, depth = 0 }: ItemProps) {
 
     // Focus input when entering edit mode
     useEffect(() => {
-        if (isEditing && inputRef.current) {
-            inputRef.current.focus();
+        if (isEditing && textareaRef.current) {
+            textareaRef.current.focus();
+            adjustTextareaHeight(textareaRef.current);
             // Move cursor to end of text
-            const length = inputRef.current.value.length;
-            inputRef.current.setSelectionRange(length, length);
+            const length = textareaRef.current.value.length;
+            textareaRef.current.setSelectionRange(length, length);
         }
     }, [isEditing]);
+
+    // Auto-enter edit mode for new/empty items
+    useEffect(() => {
+        if (!item.text && !isEditing) {
+            setIsEditing(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Auto-enter edit mode for new/empty items
+    useEffect(() => {
+        if (!item.text && !isEditing) {
+            setIsEditing(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Handle Tab key when not editing
     const handleItemKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -85,79 +125,80 @@ export function Item({ item, listId, previousItemId, depth = 0 }: ItemProps) {
 
     return (
         <>
-            <div 
-                className="group flex items-start gap-3 py-2.5 hover:bg-accent/50 transition-colors"
+            <div
+                className={`group flex items-start gap-3 py-2.5 hover:bg-accent/50 transition-colors ${item.isDone ? 'opacity-60' : ''}`}
                 style={{ paddingLeft: `${24 + depth * 24}px`, paddingRight: '24px' }}
                 onKeyDown={handleItemKeyDown}
                 tabIndex={0}
             >
-                {/* Checkbox */}
+                {/* Drag Handle (visible on hover) */}
                 <div
-                    onClick={handleToggle}
-                    className={`mt-0.5 w-4 h-4 rounded border-2 transition-colors flex-shrink-0 flex items-center justify-center cursor-pointer ${
-                        item.isDone
+                    {...(dragHandleProps || {})}
+                    className="opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-grab active:cursor-grabbing p-0.5 rounded hover:bg-muted transition-opacity"
+                    aria-label="Drag item"
+                >
+                    <GripVertical className="w-4 h-4 text-muted-foreground/50" />
+                </div>
+
+                {/* Checkbox */}
+                <div className="flex-shrink-0">
+                    <div
+                        onClick={handleToggle}
+                        className={`mt-0.5 w-4 h-4 rounded border-2 transition-colors flex items-center justify-center cursor-pointer ${item.isDone
                             ? 'bg-primary border-primary'
                             : 'border-muted-foreground/30 group-hover:border-muted-foreground/50'
-                    }`}
-                >
-                    {item.isDone && (
-                        <svg
-                            className="w-3 h-3 text-primary-foreground"
-                            fill="none"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                    )}
+                            }`}
+                    >
+                        {item.isDone && (
+                            <svg
+                                className="w-3 h-3 text-primary-foreground"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                        )}
+                    </div>
                 </div>
 
                 {/* Item text or input */}
                 <div className="flex-1 min-w-0" onClick={handleItemClick}>
                     {isEditing ? (
-                        <input
-                            ref={inputRef}
-                            type="text"
+                        <textarea
+                            ref={textareaRef}
                             value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
+                            onChange={(e) => {
+                                setEditText(e.target.value);
+                                adjustTextareaHeight(e.target);
+                            }}
                             onBlur={handleBlur}
                             onKeyDown={handleKeyDown}
-                            className="w-full text-sm leading-relaxed bg-transparent border-none outline-none focus:ring-0 p-0"
+                            rows={1}
+                            className="w-full text-sm leading-6 bg-transparent border-none outline-none focus:ring-0 p-0 m-0 resize-none overflow-hidden font-inherit block"
+                            style={{ height: 'auto', minHeight: '24px' }}
                         />
                     ) : (
-                        <p className={`text-sm leading-relaxed cursor-text ${item.isDone ? 'line-through text-muted-foreground' : ''}`}>
+                        <p className={`text-sm leading-6 cursor-text m-0 whitespace-pre-wrap min-h-[24px] block ${item.isDone ? 'line-through text-muted-foreground' : ''}`}>
                             {item.text || <span className="text-muted-foreground italic">Untitled</span>}
                         </p>
                     )}
                 </div>
 
-                {/* Delete button (visible on hover) */}
-                <button
-                    onClick={handleDelete}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded"
-                    aria-label="Delete item"
-                >
-                    <Trash2 className="w-4 h-4" style={{ color: '#737373' }} />
-                </button>
+                {/* Delete button (fixed width container to prevent layout shift) */}
+                <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                    <button
+                        onClick={handleDelete}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted"
+                        aria-label="Delete item"
+                    >
+                        <Trash2 className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                </div>
             </div>
-
-            {/* Render children recursively */}
-            {item.children && item.children.length > 0 && (
-                <>
-                    {item.children.map((child, index) => (
-                        <Item
-                            key={child.id}
-                            item={child}
-                            listId={listId}
-                            previousItemId={index > 0 ? item.children[index - 1].id : undefined}
-                            depth={depth + 1}
-                        />
-                    ))}
-                </>
-            )}
         </>
     );
 }

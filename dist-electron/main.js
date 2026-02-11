@@ -15,22 +15,28 @@ let pollingInterval = null;
 const WINDOW_WIDTH = 400;
 const ANIMATION_DURATION = 200; // ms
 const ANIMATION_STEPS = 20;
-const TRIGGER_ZONE_WIDTH = 10;
+const TRIGGER_ZONE_WIDTH = 20;
 const POLLING_INTERVAL_MS = 100;
 const startMousePolling = () => {
     pollingInterval = setInterval(() => {
         const point = electron_1.screen.getCursorScreenPoint();
-        const { width } = electron_1.screen.getPrimaryDisplay().workAreaSize;
-        // If mouse is in the trigger zone (right edge)
-        if (point.x >= width - TRIGGER_ZONE_WIDTH) {
-            showMainWindow();
+        const primaryDisplay = electron_1.screen.getPrimaryDisplay();
+        const { width, x } = primaryDisplay.bounds; // Use bounds for full edge detection
+        // Calculate the actual right edge coordinate (usually x + width)
+        const rightEdge = x + width;
+        // If mouse is in the trigger zone (right edge of primary display)
+        // AND strictly on the primary display (not on the secondary monitor to the right)
+        if (point.x >= rightEdge - TRIGGER_ZONE_WIDTH && point.x < rightEdge) {
+            if (mainWindow && !mainWindow.isVisible()) {
+                showMainWindow();
+            }
         }
     }, POLLING_INTERVAL_MS);
 };
 const showMainWindow = () => {
     if (!mainWindow)
         return;
-    const { width } = electron_1.screen.getPrimaryDisplay().workAreaSize;
+    const { width } = electron_1.screen.getPrimaryDisplay().bounds;
     const targetX = width - WINDOW_WIDTH;
     mainWindow.show();
     animateWindow(targetX);
@@ -38,7 +44,7 @@ const showMainWindow = () => {
 const hideMainWindow = () => {
     if (!mainWindow)
         return;
-    const { width } = electron_1.screen.getPrimaryDisplay().workAreaSize;
+    const { width } = electron_1.screen.getPrimaryDisplay().bounds;
     const targetX = width;
     animateWindow(targetX, () => {
         if (mainWindow)
@@ -73,7 +79,7 @@ const animateWindow = (targetX, callback) => {
     }, ANIMATION_DURATION / ANIMATION_STEPS);
 };
 const createWindow = () => {
-    const { width, height } = electron_1.screen.getPrimaryDisplay().workAreaSize;
+    const { width, height } = electron_1.screen.getPrimaryDisplay().bounds;
     // Create the browser window.
     mainWindow = new electron_1.BrowserWindow({
         width: WINDOW_WIDTH,
