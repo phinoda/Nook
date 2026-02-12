@@ -15,7 +15,7 @@ interface ItemProps {
 }
 
 export function Item({ item, listId, previousItemId, depth = 0, dragHandleProps }: ItemProps) {
-    const { toggleItemDone, deleteItem, updateItem, indentItem, unindentItem, createItemAfter } = useNookStore();
+    const { toggleItemDone, deleteItem, updateItem, indentItem, unindentItem, createItemAfter, toggleItemType } = useNookStore();
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState(item.text);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,10 +75,14 @@ export function Item({ item, listId, previousItemId, depth = 0, dragHandleProps 
             if (e.shiftKey) {
                 // Shift+Tab: Unindent
                 unindentItem(listId, item.id);
-            } else if (previousItemId) {
-                // Tab: Indent (only if there's a previous sibling)
-                indentItem(listId, item.id, previousItemId);
+            } else {
+                // Tab: Indent
+                indentItem(listId, item.id);
             }
+        } else if (e.key === 'h' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            handleSave();
+            toggleItemType(listId, item.id);
         }
     };
 
@@ -116,54 +120,67 @@ export function Item({ item, listId, previousItemId, depth = 0, dragHandleProps 
             if (e.shiftKey) {
                 // Shift+Tab: Unindent
                 unindentItem(listId, item.id);
-            } else if (previousItemId) {
-                // Tab: Indent (only if there's a previous sibling)
-                indentItem(listId, item.id, previousItemId);
+            } else {
+                // Tab: Indent
+                indentItem(listId, item.id);
             }
+        } else if (e.key === 'h' && (e.metaKey || e.ctrlKey) && !isEditing) {
+            e.preventDefault();
+            toggleItemType(listId, item.id);
         }
     };
 
     return (
         <>
             <div
-                className={`group flex items-start gap-3 py-2.5 hover:bg-accent/50 transition-colors ${item.isDone ? 'opacity-60' : ''}`}
+                className={`group flex items-start gap-3 py-1.5 hover:bg-accent/50 transition-colors relative ${item.isDone ? 'opacity-60' : ''}`}
                 style={{ paddingLeft: `${24 + depth * 24}px`, paddingRight: '24px' }}
                 onKeyDown={handleItemKeyDown}
                 tabIndex={0}
             >
-                {/* Drag Handle (visible on hover) */}
+                {/* Vertical indent guide lines */}
+                {Array.from({ length: depth }).map((_, i) => (
+                    <div
+                        key={i}
+                        className="absolute top-0 bottom-0 w-px bg-gray-200 pointer-events-none z-10"
+                        style={{ left: `${i * 24 + 36}px` }}
+                    />
+                ))}
+                {/* Drag Handle (visible on hover, fixed to far left) */}
                 <div
                     {...(dragHandleProps || {})}
-                    className="opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-grab active:cursor-grabbing p-0.5 rounded hover:bg-muted transition-opacity"
+                    className="absolute left-2 top-2 opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-grab active:cursor-grabbing p-0.5 rounded hover:bg-muted transition-opacity z-20"
                     aria-label="Drag item"
                 >
-                    <GripVertical className="w-4 h-4 text-muted-foreground/50" />
+                    <GripVertical className="w-4 h-4 text-gray-400" />
                 </div>
 
-                {/* Checkbox */}
-                <div className="flex-shrink-0">
-                    <div
-                        onClick={handleToggle}
-                        className={`mt-0.5 w-4 h-4 rounded border-2 transition-colors flex items-center justify-center cursor-pointer ${item.isDone
-                            ? 'bg-primary border-primary'
-                            : 'border-muted-foreground/30 group-hover:border-muted-foreground/50'
-                            }`}
-                    >
-                        {item.isDone && (
-                            <svg
-                                className="w-3 h-3 text-primary-foreground"
-                                fill="none"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                        )}
+                {/* Checkbox (only for tasks) */}
+                {item.type === 'task' && (
+                    <div className="flex-shrink-0">
+                        <div
+                            onClick={handleToggle}
+                            className={`mt-0.5 w-4 h-4 rounded border-2 transition-colors flex items-center justify-center cursor-pointer ${item.isDone
+                                ? 'bg-primary border-primary'
+                                : 'border-muted-foreground/30 group-hover:border-muted-foreground/50'
+                                }`}
+                        >
+                            {item.isDone && (
+                                <svg
+                                    className="w-3 h-3 text-primary-foreground"
+                                    fill="none"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="2"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Item text or input */}
                 <div className="flex-1 min-w-0" onClick={handleItemClick}>
@@ -182,7 +199,9 @@ export function Item({ item, listId, previousItemId, depth = 0, dragHandleProps 
                             style={{ height: 'auto', minHeight: '24px' }}
                         />
                     ) : (
-                        <p className={`text-sm leading-6 cursor-text m-0 whitespace-pre-wrap min-h-[24px] block ${item.isDone ? 'line-through text-muted-foreground' : ''}`}>
+                        <p className={`text-sm leading-6 cursor-text m-0 whitespace-pre-wrap min-h-[24px] block ${item.type === 'header' ? 'font-bold' : ''
+                            } ${item.type === 'task' && item.isDone ? 'line-through text-muted-foreground' : ''
+                            }`}>
                             {item.text || <span className="text-muted-foreground italic">Untitled</span>}
                         </p>
                     )}

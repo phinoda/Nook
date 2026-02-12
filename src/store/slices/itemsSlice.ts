@@ -8,13 +8,14 @@ import {
     removeItemFromTree,
     updateItemInTree,
 } from '@/utils/treeUtils';
+import { flattenItems } from '@/utils/flatten';
 
 export interface ItemsSlice {
     createItem: (listId: string, text: string, type: ItemType, parentId?: string) => void;
     updateItem: (listId: string, itemId: string, updates: Partial<Item>) => void;
     deleteItem: (listId: string, itemId: string) => void;
     toggleItemDone: (listId: string, itemId: string) => void;
-    indentItem: (listId: string, itemId: string, newParentId: string) => void;
+    indentItem: (listId: string, itemId: string) => void;
     unindentItem: (listId: string, itemId: string) => void;
     moveItem: (
         listId: string,
@@ -25,6 +26,7 @@ export interface ItemsSlice {
     addTagToItem: (listId: string, itemId: string, tagId: string) => void;
     removeTagFromItem: (listId: string, itemId: string, tagId: string) => void;
     createItemAfter: (listId: string, currentItemId: string, text?: string) => void;
+    toggleItemType: (listId: string, itemId: string) => void;
 }
 
 export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (set) => ({
@@ -148,11 +150,35 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
         }));
     },
 
-    indentItem: (listId: string, itemId: string, newParentId: string) => {
+    indentItem: (listId: string, itemId: string) => {
         set((state) => ({
             lists: state.lists.map((list) => {
                 if (list.id !== listId) return list;
 
+                // Import flattenItems to get visual order
+                const flattenedItems = flattenItems(list.items);
+
+                // Find current item's index in flattened list
+                const currentIndex = flattenedItems.findIndex(fi => fi.id === itemId);
+                if (currentIndex === -1) return list; // Item not found
+                if (currentIndex === 0) return list; // First item, cannot indent
+
+                const currentDepth = flattenedItems[currentIndex].depth;
+
+                // To indent by one level, find the last sibling (same depth) above
+                const targetDepth = currentDepth;
+                let targetParentId: string | null = null;
+                for (let i = currentIndex - 1; i >= 0; i--) {
+                    if (flattenedItems[i].depth === targetDepth) {
+                        targetParentId = flattenedItems[i].id;
+                        break;
+                    }
+                }
+
+                if (!targetParentId) return list;
+
+
+                // Remove item from current position
                 const { item: itemToMove, newItems: itemsWithoutTarget } = findAndRemoveItem(
                     list.items,
                     itemId
@@ -160,9 +186,10 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
 
                 if (!itemToMove) return list;
 
+                // Add item as child of target parent
                 const itemsWithMoved = addItemToParent(
                     itemsWithoutTarget,
-                    newParentId,
+                    targetParentId,
                     itemToMove
                 );
 
@@ -199,15 +226,26 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
 
                 let itemToMove: Item | null = null;
                 let parentOfItemToMove: Item | null = null;
+                let followingSiblings: Item[] = [];
 
                 const findAndRemove = (items: Item[], parent: Item | null = null): Item[] => {
                     const result: Item[] = [];
+                    let foundTarget = false;
+
                     for (const item of items) {
                         if (item.id === itemId) {
                             itemToMove = item;
                             parentOfItemToMove = parent;
-                            continue;
+                            foundTarget = true;
+                            continue; // Don't add to result
                         }
+
+                        // If we found the target in this array, all remaining items are following siblings
+                        if (foundTarget && parent === parentOfItemToMove) {
+                            followingSiblings.push(item);
+                            continue; // Don't add to result
+                        }
+
                         if (item.children.length > 0) {
                             const newChildren = findAndRemove(item.children, item);
                             result.push({ ...item, children: newChildren });
@@ -222,11 +260,18 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
 
                 if (!itemToMove || !parentOfItemToMove) return list; // Already at root or not found
 
-                // Now add itemToMove after parentOfItemToMove
+                // Add following siblings as children of the item being unindented
+                const itemWithNewChildren: Item = {
+                    ...itemToMove!,
+                    children: [...itemToMove!.children, ...followingSiblings],
+                    updatedAt: new Date(),
+                };
+
+                // Now add itemWithNewChildren after parentOfItemToMove
                 const addAfterParent = (items: Item[]): Item[] => {
                     return items.flatMap((item) => {
                         if (item.id === parentOfItemToMove!.id) {
-                            return [item, itemToMove!];
+                            return [item, itemWithNewChildren];
                         }
                         if (item.children.length > 0) {
                             return [{ ...item, children: addAfterParent(item.children) }];
@@ -312,6 +357,28 @@ export const createItemsSlice: StateCreator<NookStore, [], [], ItemsSlice> = (se
                         ...item,
                         tagIds: item.tagIds.filter((id) => id !== tagId),
                     })),
+                    updatedAt: new Date(),
+                };
+            }),
+        }));
+    },
+
+    toggleItemType: (listId: string, itemId: string) => {
+        set((state) => ({
+            lists: state.lists.map((list) => {
+                if (list.id !== listId) return list;
+
+                return {
+                    ...list,
+                    items: updateItemInTree(list.items, itemId, (item) => {
+                        const newType: ItemType = item.type === 'task' ? 'header' : 'task';
+                        return {
+                            ...item,
+                            type: newType,
+                            // Reset isDone to false when converting to task
+                            isDone: newType === 'task' ? false : item.isDone,
+                        };
+                    }),
                     updatedAt: new Date(),
                 };
             }),

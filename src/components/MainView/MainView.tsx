@@ -42,17 +42,28 @@ function SortableItemWrapper({ flatItem, listId }: SortableItemWrapperProps) {
         transform,
         transition,
         isDragging,
+        isOver,
         setActivatorNodeRef,
     } = useSortable({ id: flatItem.id });
 
     const style = {
-        transform: CSS.Translate.toString(transform),
+        // transform: CSS.Translate.toString(transform), // Disabled to prevent items from moving during drag
         transition,
         opacity: isDragging ? 0.5 : 1,
     };
 
+    // Calculate the left offset for the drop indicator based on depth
+    const indicatorLeftOffset = 24 + flatItem.depth * 24;
+
     return (
-        <div ref={setNodeRef} style={style} {...attributes}>
+        <div ref={setNodeRef} style={style} {...attributes} className="relative">
+            {/* Drop indicator line - positioned at the item's depth level */}
+            {isOver && (
+                <div
+                    className="absolute top-0 right-0 h-0.5 bg-gray-400 z-30 -mt-px pointer-events-none"
+                    style={{ left: `${indicatorLeftOffset}px` }}
+                />
+            )}
             <Item
                 item={flatItem.item}
                 listId={listId}
@@ -132,8 +143,8 @@ export function MainView() {
 
         if (oldIndex === -1 || newIndex === -1) return;
 
-        // Determine the new parent and depth based on the item below the drop position
-        const itemBelow = flatItems[newIndex + 1];
+        // Determine the new parent and depth based on the item below the drop position (the target item itself)
+        const itemBelow = flatItems[newIndex];
         const itemAbove = flatItems[newIndex - 1];
 
         let newParentId: string | null;
@@ -142,32 +153,35 @@ export function MainView() {
         if (itemBelow) {
             // Use the parent and depth of the item below
             newParentId = itemBelow.parentId;
-            // Find the index within the parent's children
+            // Find the index within the parent's children (excluding the dragged item)
+            // We slice up to newIndex (exclusive) to count only siblings BEFORE the target item
             if (newParentId === null) {
                 // Root level - count root items before this position
                 indexInParent = flatItems
-                    .slice(0, newIndex + 1)
-                    .filter(item => item.parentId === null).length - 1;
+                    .slice(0, newIndex)
+                    .filter(item => item.parentId === null && item.id !== active.id).length;
             } else {
                 // Child level - count siblings before this position
                 indexInParent = flatItems
-                    .slice(0, newIndex + 1)
-                    .filter(item => item.parentId === newParentId).length - 1;
+                    .slice(0, newIndex)
+                    .filter(item => item.parentId === newParentId && item.id !== active.id).length;
             }
         } else if (itemAbove) {
             // Dropped at the bottom - use the parent of the item above
             newParentId = itemAbove.parentId;
-            // Add at the end of the parent's children
+            // Add at the end of the parent's children (excluding the dragged item)
             if (newParentId === null) {
-                indexInParent = flatItems.filter(item => item.parentId === null).length;
+                indexInParent = flatItems.filter(item => item.parentId === null && item.id !== active.id).length;
             } else {
-                indexInParent = flatItems.filter(item => item.parentId === newParentId).length;
+                indexInParent = flatItems.filter(item => item.parentId === newParentId && item.id !== active.id).length;
             }
         } else {
             // Empty list
             newParentId = null;
             indexInParent = 0;
         }
+
+
 
         moveItem(activeListId, active.id as string, newParentId, indexInParent);
     };
@@ -211,8 +225,10 @@ export function MainView() {
             {/* Progress and Filter */}
             {activeList && flattenItems(activeList.items).length > 0 && (() => {
                 const allItems = flattenItems(activeList.items);
-                const total = allItems.length;
-                const completed = allItems.filter(i => i.item.isDone).length;
+                // Only count tasks, not headers
+                const tasks = allItems.filter(i => i.item.type === 'task');
+                const total = tasks.length;
+                const completed = tasks.filter(i => i.item.isDone).length;
                 const percent = total > 0 ? (completed / total) * 100 : 0;
 
                 return (
@@ -228,7 +244,7 @@ export function MainView() {
                                 />
                             </div>
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                {completed === 0 ? "not started yet" : `${completed}/${total} ${completed === 1 ? 'task' : 'tasks'} completed`}
+                                {completed === 0 ? "not started yet" : `${completed}/${total} completed`}
                             </span>
                         </div>
 
@@ -286,7 +302,7 @@ export function MainView() {
                 {createPortal(
                     <DragOverlay dropAnimation={dropAnimationConfig}>
                         {activeItem ? (
-                            <div className="bg-background border rounded-md shadow-lg">
+                            <div className="bg-background border rounded-md">
                                 <Item
                                     item={activeItem.item}
                                     listId={activeListId}

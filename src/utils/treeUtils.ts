@@ -1,4 +1,4 @@
-import type { Item, ItemType } from '@/types';
+import type { Item } from '@/types';
 
 /**
  * Finds an item in the tree by its ID.
@@ -82,7 +82,6 @@ export const addItemToParent = (
             return {
                 ...item,
                 children: newChildren,
-                type: 'group' as ItemType,
                 updatedAt: new Date(),
             };
         }
